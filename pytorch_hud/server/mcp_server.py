@@ -7,7 +7,8 @@ CI issues, analyzing logs, and querying data from ClickHouse.
 """
 
 import json
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
+from datetime import datetime
 from mcp.server.fastmcp import FastMCP, Context
 
 from pytorch_hud.api.client import PyTorchHudAPI
@@ -441,6 +442,19 @@ async def get_failure_details_resource(repo_owner: str, repo_name: str, branch_o
             "include_lines": include_mode,
             "recommended_filters": "For large responses, use include_lines='summary' or include_lines='none'"
         }
+    
+    # Add timestamp for debugging job count differences
+    result["_metadata"] = {
+        "timestamp": datetime.now().isoformat(),
+        "api_call": "get_failure_details_resource",
+        "parameter_signatures": {
+            "repo_owner": repo_owner,
+            "repo_name": repo_name,
+            "branch_or_commit_sha": branch_or_commit_sha,
+            "page": page,
+            "per_page": per_page
+        }
+    }
 
     return safe_json_dumps(result, indent=2)
 
@@ -1063,7 +1077,7 @@ When analyzing extracted log sections:
 Remember: Focus on extracting and analyzing relevant portions of logs rather than attempting to process entire log files."""
 
 @mcp.tool()
-async def get_recent_commit_status(repo_owner: str, repo_name: str, branch: str = "main",
+async def get_recent_commit_status(repo_owner: str, repo_name: str, branch_or_commit_sha: str = "main",
                             count: int = 20, include_pending: bool = True, 
                             ctx: Optional[Context] = None) -> Dict[str, Any]:
     """Get status information for recent commits with detailed job status breakdown.
@@ -1084,8 +1098,10 @@ async def get_recent_commit_status(repo_owner: str, repo_name: str, branch: str 
     Args:
         repo_owner: Repository owner (e.g., 'pytorch')
         repo_name: Repository name (e.g., 'pytorch')
-        branch: Branch name (default: 'main')
-        count: Number of recent commits to check (default: 5)
+        branch_or_commit_sha: Branch name (e.g., 'main') or commit SHA
+            - When passing a branch name like 'main', returns recent commits on that branch
+            - When passing a full commit SHA, returns data starting from that specific commit
+        count: Number of recent commits to check (default: 20)
         include_pending: Whether to include pending jobs in counts (default: True)
         ctx: Optional MCP context for progress reporting
 
@@ -1097,7 +1113,7 @@ async def get_recent_commit_status(repo_owner: str, repo_name: str, branch: str 
         - Links to each commit's HUD page
     """
     if ctx:
-        await ctx.info(f"Fetching recent commit status for {repo_owner}/{repo_name} on branch {branch}")
+        await ctx.info(f"Fetching recent commit status for {repo_owner}/{repo_name} with branch_or_commit_sha={branch_or_commit_sha}")
 
         # Report progress
         if hasattr(ctx, 'report_progress') and callable(ctx.report_progress):
@@ -1105,7 +1121,7 @@ async def get_recent_commit_status(repo_owner: str, repo_name: str, branch: str 
 
     # Fetch a large number of recent commits with a single API call
     # We'll use a higher per_page value to get multiple commits at once
-    hud_data = api.get_hud_data(repo_owner, repo_name, branch, per_page=count)
+    hud_data = api.get_hud_data(repo_owner, repo_name, branch_or_commit_sha, per_page=count)
 
     if ctx:
         # Report progress
@@ -1113,6 +1129,18 @@ async def get_recent_commit_status(repo_owner: str, repo_name: str, branch: str 
             await ctx.report_progress(1, 2)
         
         await ctx.info(f"Processing {len(hud_data.get('shaGrid', []))} commits from API response")
+        
+    # Add API call information for debugging
+    call_info = {
+        "timestamp": datetime.now().isoformat(),
+        "api_endpoint": "get_hud_data",
+        "parameters": {
+            "repo_owner": repo_owner,
+            "repo_name": repo_name,
+            "branch_or_commit_sha": branch_or_commit_sha,
+            "per_page": count
+        }
+    }
 
     # Process the commits from the API response
     commits = []
@@ -1200,9 +1228,9 @@ async def get_recent_commit_status(repo_owner: str, repo_name: str, branch: str 
     if ctx:
         await ctx.info(f"Finished processing {len(commits)} commits")
 
-    return {
+    result = {
         "repo": f"{repo_owner}/{repo_name}",
-        "branch": branch,
+        "branch": branch_or_commit_sha,
         "commits": commits,
         "summary": {
             "total_commits": len(commits),
@@ -1211,9 +1239,14 @@ async def get_recent_commit_status(repo_owner: str, repo_name: str, branch: str 
             "pending_commits": sum(1 for c in commits if c["status"] == "pending")
         }
     }
+    
+    # Add API call information
+    result["_source"] = call_info
+    
+    return result
 
 @mcp.tool()
-async def get_recent_commit_status_resource(repo_owner: str, repo_name: str, branch: str = "main",
+async def get_recent_commit_status_resource(repo_owner: str, repo_name: str, branch_or_commit_sha: str = "main",
                                       count: int = 20, include_pending: bool = True, ctx: Optional[Context] = None) -> str:
     """Get status information for recent commits with detailed job status breakdown.
 
@@ -1224,7 +1257,9 @@ async def get_recent_commit_status_resource(repo_owner: str, repo_name: str, bra
     Parameters:
         repo_owner: Repository owner (e.g., 'pytorch')
         repo_name: Repository name (e.g., 'pytorch')
-        branch: Branch name (default: 'main')
+        branch_or_commit_sha: Branch name (e.g., 'main') or commit SHA
+            - When passing a branch name like 'main', returns recent commits on that branch
+            - When passing a full commit SHA, returns data starting from that specific commit
         count: Number of recent commits to check (default: 20)
         include_pending: Whether to include pending jobs in counts (default: True)
         ctx: Optional MCP context
@@ -1234,12 +1269,28 @@ async def get_recent_commit_status_resource(repo_owner: str, repo_name: str, bra
         - Commit metadata (sha, title, author)
         - Job counts by status (success, failure, pending)
         - Overall commit status (red, green, or pending)
+        
+    Note:
+        This function determines job status based solely on the job's conclusion
+        field, not on the presence of failure lines.
     """
     # Use parameters directly - no conversion needed
     # Get data
     commit_status = await get_recent_commit_status(
-        repo_owner, repo_name, branch, count, include_pending, ctx=ctx
+        repo_owner, repo_name, branch_or_commit_sha, count, include_pending, ctx=ctx
     )
+    
+    # Add timestamp for debugging job count differences
+    commit_status["_metadata"] = {
+        "timestamp": datetime.now().isoformat(),
+        "api_call": "get_recent_commit_status_resource",
+        "parameter_signatures": {
+            "repo_owner": repo_owner,
+            "repo_name": repo_name,
+            "branch_or_commit_sha": branch_or_commit_sha,
+            "count": count
+        }
+    }
 
     return safe_json_dumps(commit_status, indent=2)
 

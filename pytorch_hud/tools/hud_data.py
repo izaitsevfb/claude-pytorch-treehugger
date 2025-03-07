@@ -360,7 +360,7 @@ async def get_failure_details(repo_owner: str, repo_name: str, branch_or_commit_
             status = job.get("status", "unknown")
             conclusion = job.get("conclusion", "unknown")
 
-            # No hidden failures - only use job conclusion 
+            # Only use job conclusion for determining status
             if conclusion == "success":
                 job_status_counts["success"] += 1
             elif conclusion == "failure":
@@ -373,8 +373,7 @@ async def get_failure_details(repo_owner: str, repo_name: str, branch_or_commit_
                     "durationS": job.get("durationS", 0),
                     "failureLines": job.get("failureLines", []),
                     "failureCaptures": job.get("failureCaptures", []),
-                    "failureLineNumbers": job.get("failureLineNumbers", []),
-                    "hiddenFailure": False  # Explicit failure
+                    "failureLineNumbers": job.get("failureLineNumbers", [])
                 }
                 failed_jobs.append(failed_job)
             elif conclusion == "skipped":

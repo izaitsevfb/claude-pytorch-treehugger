@@ -122,7 +122,7 @@ class TestGetHudDataLive(unittest.IsolatedAsyncioTestCase):
         multi_data = await get_hud_data(
             repo_owner="pytorch",
             repo_name="pytorch",
-            branch_or_commit_sha="main",
+            branch_or_commit_sha=single_data["shaGrid"][0].get("sha"),  # Use the first commit SHA
             per_page=3
         )
         

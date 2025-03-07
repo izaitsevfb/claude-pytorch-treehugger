@@ -76,11 +76,7 @@ class TestFailureDetails(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("job2", failure_ids, "Job with success conclusion but failure lines should NOT be in failed_jobs list")
         self.assertIn("job3", failure_ids, "Explicit failure should be in failed_jobs list")
         
-        # Check that hiddenFailure flag is correctly set
-        for job in result["failed_jobs"]:
-            if job["id"] == "job3":
-                self.assertFalse(job["hiddenFailure"], "Explicit failure should be marked with hiddenFailure=False")
-                
+
         # Build status should be "failing" due to failures
         self.assertEqual(result["build_status"], "failing")
 
