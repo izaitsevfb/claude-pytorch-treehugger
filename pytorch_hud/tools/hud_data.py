@@ -148,13 +148,8 @@ async def get_job_summary(repo_owner: str, repo_name: str, branch_or_commit_sha:
             # Update status counts
             status_counts["total"] += 1
 
-            # Check for hidden failures (success conclusion but with failure lines)
-            has_failure_lines = "failureLines" in job and job["failureLines"] and len(job["failureLines"]) > 0
-
-            if has_failure_lines:
-                # If it has failure lines, it's a failure regardless of conclusion
-                status_counts["failure"] += 1
-            elif conclusion == "success":
+            # Only use job conclusion for determining status, not failure lines
+            if conclusion == "success":
                 status_counts["success"] += 1
             elif conclusion == "failure":
                 status_counts["failure"] += 1
@@ -240,15 +235,12 @@ async def get_filtered_jobs(repo_owner: str, repo_name: str, branch_or_commit_sh
 
             # Filter by status/conclusion
             if status:
-                # Special case for "failure" filter - also include jobs with failure lines
+                # Special case for "failure" filter - only include jobs with failure conclusion
                 if status == "failure":
-                    # Count as failure if:
-                    # 1. conclusion is explicitly "failure" OR
-                    # 2. has non-empty failure lines (hidden failures)
+                    # Only count as failure if conclusion is explicitly "failure"
                     has_explicit_failure = job.get("conclusion") == "failure"
-                    has_failure_lines = "failureLines" in job and job["failureLines"] and len(job["failureLines"]) > 0
 
-                    if not (has_explicit_failure or has_failure_lines):
+                    if not has_explicit_failure:
                         include_job = False
                 # Normal status matching for other statuses
                 elif job.get("conclusion") != status and job.get("status") != status:
@@ -368,26 +360,8 @@ async def get_failure_details(repo_owner: str, repo_name: str, branch_or_commit_
             status = job.get("status", "unknown")
             conclusion = job.get("conclusion", "unknown")
 
-            # Check for hidden failures (success conclusion but with failure lines)
-            has_failure_lines = "failureLines" in job and job["failureLines"] and len(job["failureLines"]) > 0
-
-            if has_failure_lines and conclusion != "failure":
-                # Hidden failure case - job has failure lines but not marked as failure
-                job_status_counts["failure"] += 1
-
-                # Extract only the necessary information for the hidden failure
-                failed_job = {
-                    "id": job.get("id"),
-                    "htmlUrl": job.get("htmlUrl", ""),
-                    "logUrl": job.get("logUrl", ""),
-                    "durationS": job.get("durationS", 0),
-                    "failureLines": job.get("failureLines", []),
-                    "failureCaptures": job.get("failureCaptures", []),
-                    "failureLineNumbers": job.get("failureLineNumbers", []),
-                    "hiddenFailure": True  # Add flag to indicate this is a hidden failure
-                }
-                failed_jobs.append(failed_job)
-            elif conclusion == "success" and not has_failure_lines:
+            # No hidden failures - only use job conclusion 
+            if conclusion == "success":
                 job_status_counts["success"] += 1
             elif conclusion == "failure":
                 job_status_counts["failure"] += 1
@@ -563,13 +537,8 @@ async def get_workflow_summary(repo_owner: str, repo_name: str, branch_or_commit
                     status = job.get("status", "unknown")
                     conclusion = job.get("conclusion", "unknown")
 
-                    # Check for hidden failures (success conclusion but with failure lines)
-                    has_failure_lines = "failureLines" in job and job["failureLines"] and len(job["failureLines"]) > 0
-
-                    if has_failure_lines:
-                        # If it has failure lines, it's a failure regardless of conclusion
-                        workflow["failure"] += 1
-                    elif conclusion == "success":
+                    # Only use conclusion for determining status
+                    if conclusion == "success":
                         workflow["success"] += 1
                     elif conclusion == "failure":
                         workflow["failure"] += 1
@@ -658,11 +627,10 @@ async def get_test_summary(repo_owner: str, repo_name: str, branch_or_commit_sha
             if html_url and "test" in html_url.lower():
                 test_summary["test_jobs"] = cast(int, test_summary["test_jobs"]) + 1
 
-                # Check for failures (both explicit and hidden)
-                is_explicit_failure = job.get("conclusion") == "failure"
-                has_failure_lines = "failureLines" in job and job["failureLines"] and len(job["failureLines"]) > 0
+                # Check for explicit failures only
+                is_failure = job.get("conclusion") == "failure"
 
-                if is_explicit_failure or has_failure_lines:
+                if is_failure:
                     # Extract any test failure patterns
                     failure_lines = job.get("failureLines", [])
 

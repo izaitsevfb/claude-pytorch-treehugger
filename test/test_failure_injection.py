@@ -116,9 +116,9 @@ class TestFailureInjection(unittest.IsolatedAsyncioTestCase):
         # Call get_job_summary
         result = await get_job_summary("pytorch", "pytorch", "main", ctx=mock_ctx)
         
-        # Verify failure count
-        # Should include both explicit failures (conclusion=failure) and hidden failures (conclusion=success but with failureLines)
-        expected_failure_count = 3  # 1 explicit failure + 1 hidden failure + 1 test failure
+        # Verify failure count - now only counts jobs with conclusion=failure
+        # Updated to reflect new logic: only explicit failures (conclusion=failure) counted as failures
+        expected_failure_count = 2  # 1 explicit failure + 1 test failure (both have conclusion=failure)
         actual_failure_count = result["status_counts"]["failure"]
         
         self.assertEqual(actual_failure_count, expected_failure_count, 
@@ -166,13 +166,14 @@ class TestFailureInjection(unittest.IsolatedAsyncioTestCase):
         # because test_failure might be in a different workflow due to different URL
         actual_workflow_failures = target_workflow["failure"]
         
-        # Assert we have at least 2 failures (the explicit and hidden in same workflow)
-        self.assertGreaterEqual(actual_workflow_failures, 2, 
-                              f"Expected at least 2 failures in workflow, got {actual_workflow_failures}")
+        # Assert we have at least 1 failure (the explicit failure in same workflow)
+        # Hidden failures are no longer counted as failures
+        self.assertGreaterEqual(actual_workflow_failures, 1, 
+                              f"Expected at least 1 failure in workflow, got {actual_workflow_failures}")
         
-        # Count total failures across all workflows - should be 3
+        # Count total failures across all workflows - should be 2 (both explicit failures)
         total_failures = sum(w["failure"] for w in result["workflows"])
-        self.assertEqual(total_failures, 3, f"Expected 3 total failures across all workflows, got {total_failures}")
+        self.assertEqual(total_failures, 2, f"Expected 2 total failures across all workflows, got {total_failures}")
         
         # Print results for debugging
         print("Workflow Summary Results:")
@@ -247,19 +248,19 @@ class TestFailureInjection(unittest.IsolatedAsyncioTestCase):
         # Call get_filtered_jobs with failure filter
         result = await get_filtered_jobs("pytorch", "pytorch", "main", status="failure", ctx=mock_ctx)
         
-        # Verify the number of jobs returned
-        expected_job_count = 3  # 1 explicit + 1 hidden + 1 test failure
+        # Verify the number of jobs returned - only jobs with conclusion=failure
+        expected_job_count = 2  # 1 explicit + 1 test failure (both have conclusion=failure)
         actual_job_count = len(result["jobs"])
         
         self.assertEqual(actual_job_count, expected_job_count, 
                        f"Expected {expected_job_count} jobs, got {actual_job_count}")
         
-        # Verify the job IDs in the result
+        # Verify the job IDs in the result - now only explicit failures
         job_ids = [job.get("id") for job in result["jobs"]]
         
         self.assertIn(99999001, job_ids, "Explicit failure job not in result")
-        self.assertIn(99999002, job_ids, "Hidden failure job not in result")
         self.assertIn(99999003, job_ids, "Test failure job not in result")
+        self.assertNotIn(99999002, job_ids, "Hidden failure job should NOT be in result")
         
         # Print results for debugging
         print("Filtered Jobs Results:")

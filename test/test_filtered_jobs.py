@@ -257,18 +257,18 @@ class TestFilteredJobs(unittest.IsolatedAsyncioTestCase):
         # Create a mock context with async methods
         mock_ctx = create_async_mock_context()
         
-        # Test filtering by failure status - should include both explicit and hidden failures
+        # Test filtering by failure status - should include only explicit failures now
         result = await get_filtered_jobs("pytorch", "pytorch", "main", status="failure", ctx=mock_ctx)
         
         # Verify result
         self.assertEqual(result["filters"]["status"], "failure")
-        self.assertEqual(len(result["jobs"]), 2, "Should include both hidden and explicit failures")
+        self.assertEqual(len(result["jobs"]), 1, "Should include only explicit failures")
         
         # Get job IDs from result for verification
         job_ids = [job.get("id") for job in result["jobs"]]
         
-        # Check that both failure jobs are included (job2 - hidden failure, job3 - explicit failure)
-        self.assertIn("job2", job_ids, "Hidden failure should be included in results")
+        # Check that only the explicit failure job is included (job3)
+        self.assertNotIn("job2", job_ids, "Hidden failure should NOT be included in results")
         self.assertIn("job3", job_ids, "Explicit failure should be included in results")
         self.assertNotIn("job1", job_ids, "Success job should not be in failure results")
 

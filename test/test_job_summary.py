@@ -57,10 +57,10 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
         # Call the function with mock context
         result = await get_job_summary("pytorch", "pytorch", "main", ctx=mock_ctx)
         
-        # Verify the results
+        # Verify the results - updated for new behavior
         self.assertEqual(result["status_counts"]["total"], 3)
-        self.assertEqual(result["status_counts"]["success"], 1)  # Only 1 true success
-        self.assertEqual(result["status_counts"]["failure"], 2)  # 1 explicit + 1 hidden failure
+        self.assertEqual(result["status_counts"]["success"], 2)  # Both jobs with success conclusion
+        self.assertEqual(result["status_counts"]["failure"], 1)  # Only explicit failures counted
         
         # Make sure the API was called correctly
         mock_api.get_hud_data.assert_called_once_with("pytorch", "pytorch", "main", per_page=1)
@@ -128,11 +128,11 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
             elif wf["name"] == "workflow2":
                 workflow2 = wf
         
-        # Verify workflow1 has correct counts
+        # Verify workflow1 has correct counts - updated for new behavior
         self.assertIsNotNone(workflow1)
         self.assertEqual(workflow1["total_jobs"], 2)
-        self.assertEqual(workflow1["success"], 1)  # Only 1 true success
-        self.assertEqual(workflow1["failure"], 1)  # 1 hidden failure
+        self.assertEqual(workflow1["success"], 2)  # Both jobs with success conclusion
+        self.assertEqual(workflow1["failure"], 0)  # No explicit failures
         
         # Verify workflow2 has correct counts
         self.assertIsNotNone(workflow2)
@@ -194,9 +194,9 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
         # Call the function with mock context
         result = await get_test_summary("pytorch", "pytorch", "main", ctx=mock_ctx)
         
-        # Verify the results
+        # Verify the results - updated for new behavior that only checks explicit failures
         self.assertEqual(result["test_jobs"], 3)  # 3 test jobs
-        self.assertEqual(result["total_failed_tests"], 2)  # 2 failed tests (1 from hidden failure, 1 from explicit)
+        self.assertEqual(result["total_failed_tests"], 1)  # 1 failed test (only from explicit failure)
 
 
 if __name__ == '__main__':

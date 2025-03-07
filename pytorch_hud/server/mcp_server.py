@@ -1078,9 +1078,8 @@ async def get_recent_commit_status(repo_owner: str, repo_name: str, branch: str 
     recent data for the specific commit, but may miss some failures from earlier builds
     of the same commit.
 
-    NOTE: Some jobs in the API response may have a conclusion of "success" but still
-    contain failure lines. This function counts such jobs as failures, regardless of
-    their conclusion status, to give a more accurate picture of build health.
+    NOTE: This function determines job status based solely on the job's conclusion
+    field, not on the presence of failure lines.
 
     Args:
         repo_owner: Repository owner (e.g., 'pytorch')
@@ -1149,12 +1148,8 @@ async def get_recent_commit_status(repo_owner: str, repo_name: str, branch: str 
             status = job.get("status", "unknown")
             conclusion = job.get("conclusion", "unknown")
 
-            # Count jobs by status, looking for failure indicators
-            # Some jobs have failure lines but are still marked as "success" - these should count as failures
-            if "failureLines" in job and job["failureLines"] and len(job["failureLines"]) > 0:
-                # If it has failure lines, it's a failure regardless of conclusion
-                failure_jobs += 1
-            elif conclusion == "success":
+            # Count jobs by status based only on the conclusion
+            if conclusion == "success":
                 success_jobs += 1
             elif conclusion == "failure":
                 failure_jobs += 1

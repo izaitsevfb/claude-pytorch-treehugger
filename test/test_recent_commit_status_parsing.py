@@ -117,11 +117,11 @@ class TestRecentCommitStatusParsing(unittest.IsolatedAsyncioTestCase):
             
             # This sample has:
             # - 2 traditional failures (conclusion = "failure")
-            # - 1 hidden failure (conclusion = "success" but has failureLines)
+            # - 1 job with success conclusion but failure lines (counted as success)
             # - 2 real successes (one with empty failureLines, one without)
             self.assertEqual(job_counts["total"], 5, "Should count all jobs")
-            self.assertEqual(job_counts["success"], 2, "Should count 2 success jobs")
-            self.assertEqual(job_counts["failure"], 3, "Should count 3 failures (including hidden failure)")
+            self.assertEqual(job_counts["success"], 3, "Should count 3 success jobs")
+            self.assertEqual(job_counts["failure"], 2, "Should count 2 failures (only explicit failures)")
             self.assertEqual(job_counts["pending"], 0, "Should have no pending jobs")
             self.assertEqual(job_counts["skipped"], 0, "Should have no skipped jobs")
             

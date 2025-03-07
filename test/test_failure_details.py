@@ -61,26 +61,24 @@ class TestFailureDetails(unittest.IsolatedAsyncioTestCase):
         # Call function
         result = await get_failure_details("pytorch", "pytorch", "main")
         
-        # Verify job counts
+        # Verify job counts - updated to reflect new behavior of only counting explicit failures
         self.assertEqual(result["job_status_counts"]["total"], 4, "Should count all jobs")
-        self.assertEqual(result["job_status_counts"]["success"], 1, "Should count 1 success job")
-        self.assertEqual(result["job_status_counts"]["failure"], 2, "Should count 2 failures (including hidden)")
+        self.assertEqual(result["job_status_counts"]["success"], 2, "Should count 2 success jobs (including one with failure lines)")
+        self.assertEqual(result["job_status_counts"]["failure"], 1, "Should count 1 explicit failure")
         self.assertEqual(result["job_status_counts"]["in_progress"], 1, "Should count 1 in-progress job")
         
-        # Verify failures list
-        self.assertEqual(result["total_failures"], 2, "Should list 2 failures")
-        self.assertEqual(len(result["failed_jobs"]), 2, "Should include 2 failed jobs")
+        # Verify failures list - now only including explicit failures
+        self.assertEqual(result["total_failures"], 1, "Should list 1 failure")
+        self.assertEqual(len(result["failed_jobs"]), 1, "Should include 1 failed job")
         
-        # Verify we have both failure types in the list
+        # Verify only the explicit failure is in the list
         failure_ids = [job.get("id") for job in result["failed_jobs"]]
-        self.assertIn("job2", failure_ids, "Hidden failure should be in failed_jobs list")
+        self.assertNotIn("job2", failure_ids, "Job with success conclusion but failure lines should NOT be in failed_jobs list")
         self.assertIn("job3", failure_ids, "Explicit failure should be in failed_jobs list")
         
-        # Check for hiddenFailure flag
+        # Check that hiddenFailure flag is correctly set
         for job in result["failed_jobs"]:
-            if job["id"] == "job2":
-                self.assertTrue(job["hiddenFailure"], "Hidden failure should be marked with hiddenFailure=True")
-            elif job["id"] == "job3":
+            if job["id"] == "job3":
                 self.assertFalse(job["hiddenFailure"], "Explicit failure should be marked with hiddenFailure=False")
                 
         # Build status should be "failing" due to failures
