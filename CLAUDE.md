@@ -258,6 +258,11 @@ The primary functionality is a wrapper for the PyTorch HUD API with CLI and MCP 
 3. **ClickHouse Queries**: Execute pre-defined queries against PyTorch CI analytics database
 4. **Resource Metrics**: Analyze CI performance and resource usage
 
+### Documentation
+
+- **API Response Structure**: See `/docs/hud_data_structure.md` for detailed documentation of the HUD data response format and structure
+- **Sample Data**: A sample HUD data response is available at `/docs/hud_data_sample.json`
+
 ## Note about Async Functions
 
 Our earlier understanding that async functions couldn't be directly registered with FastMCP was incorrect. FastMCP fully supports async functions, as shown in their example code and implementation.

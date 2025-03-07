@@ -43,6 +43,10 @@ async def get_hud_data(repo_owner: str, repo_name: str, branch_or_commit_sha: st
     Important:
         The API doesn't accept "HEAD" as a special value. To get the latest commit,
         use a branch name like "main" instead.
+        
+    See Also:
+        For detailed documentation about the response format and structure, see:
+        /docs/hud_data_structure.md
     """
     if ctx:
         await ctx.info(f"Fetching HUD data for {repo_owner}/{repo_name} with branch_or_commit_sha={branch_or_commit_sha}")
