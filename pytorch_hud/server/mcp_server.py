@@ -7,7 +7,7 @@ CI issues, analyzing logs, and querying data from ClickHouse.
 """
 
 import json
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP, Context
 

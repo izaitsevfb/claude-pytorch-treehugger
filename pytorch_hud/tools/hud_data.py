@@ -11,6 +11,60 @@ from pytorch_hud.api.client import PyTorchHudAPI
 # Initialize API client singleton
 api = PyTorchHudAPI()
 
+def enrich_jobs_with_names(jobs: List[Dict[str, Any]], job_names: List[str]) -> List[Dict[str, Any]]:
+    """Enrich job objects with their names from the jobNames array.
+    
+    Args:
+        jobs: List of job objects
+        job_names: List of job names from the jobNames array
+        
+    Returns:
+        List of job objects with 'name' field added/updated
+    """
+    enriched_jobs = []
+    
+    for job in jobs:
+        job_id = job.get("id")
+        enriched_job = job.copy()
+        
+        # First try to get job name from jobNames array if ID is available 
+        # and is a valid index into job_names
+        if job_id is not None and isinstance(job_id, int) and 0 <= job_id < len(job_names):
+            enriched_job["name"] = job_names[job_id]
+        
+        # Fallback: extract from URL if still needed
+        elif "name" not in enriched_job and "htmlUrl" in enriched_job:
+            html_url = enriched_job.get("htmlUrl", "")
+            if html_url:
+                parts = html_url.split("/")
+                if len(parts) > 4:
+                    enriched_job["name"] = parts[-1]  # Extract job name from URL
+                    
+        enriched_jobs.append(enriched_job)
+    
+    return enriched_jobs
+
+def enrich_hud_data(hud_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract and enrich jobs from HUD data with their names.
+    
+    This helper function handles the common pattern of extracting jobs from HUD data
+    and enriching them with names from the jobNames array.
+    
+    Args:
+        hud_data: The response from get_hud_data
+        
+    Returns:
+        List of jobs enriched with names, or empty list if no jobs found
+    """
+    job_names = hud_data.get("jobNames", [])
+    
+    # Process job data if available
+    if "shaGrid" in hud_data and len(hud_data["shaGrid"]) > 0 and "jobs" in hud_data["shaGrid"][0]:
+        jobs = hud_data["shaGrid"][0]["jobs"]
+        return enrich_jobs_with_names(jobs, job_names)
+    
+    return []
+
 async def get_hud_data(repo_owner: str, repo_name: str, branch_or_commit_sha: str,
                 per_page: int = 3, merge_lf: bool = True, page: int = 1,
                 ctx: Optional[Context] = None) -> Dict[str, Any]:
@@ -222,42 +276,46 @@ async def get_filtered_jobs(repo_owner: str, repo_name: str, branch_or_commit_sh
     # Fetch data with a relatively large per_page to support filtering
     hud_data = api.get_hud_data(repo_owner, repo_name, branch_or_commit_sha, per_page=1)
 
+    # Get enriched jobs
+    enriched_jobs = enrich_hud_data(hud_data)
     filtered_jobs = []
     total_jobs = 0
 
-    # Process job data if available
-    if "shaGrid" in hud_data and len(hud_data["shaGrid"]) > 0 and "jobs" in hud_data["shaGrid"][0]:
-        jobs = hud_data["shaGrid"][0]["jobs"]
+    # Apply filters
+    for job in enriched_jobs:
+        include_job = True
 
-        # Apply filters
-        for job in jobs:
-            include_job = True
+                # Filter by status/conclusion
+        if status:
+            # Special case for "failure" filter - only include jobs with failure conclusion
+            if status == "failure":
+                # Only count as failure if conclusion is explicitly "failure"
+                has_explicit_failure = job.get("conclusion") == "failure"
 
-            # Filter by status/conclusion
-            if status:
-                # Special case for "failure" filter - only include jobs with failure conclusion
-                if status == "failure":
-                    # Only count as failure if conclusion is explicitly "failure"
-                    has_explicit_failure = job.get("conclusion") == "failure"
-
-                    if not has_explicit_failure:
-                        include_job = False
-                # Normal status matching for other statuses
-                elif job.get("conclusion") != status and job.get("status") != status:
+                if not has_explicit_failure:
                     include_job = False
+            # Normal status matching for other statuses
+            elif job.get("conclusion") != status and job.get("status") != status:
+                include_job = False
 
-            # Filter by workflow
-            if workflow and include_job:
-                html_url = job.get("htmlUrl", "")
-                if html_url:
-                    if workflow.lower() not in html_url.lower():
-                        include_job = False
-                else:
-                    # If the job doesn't have an HTML URL, we can't match the workflow
+        # Filter by workflow
+        if workflow and include_job:
+            html_url = job.get("htmlUrl", "")
+            if html_url:
+                if workflow.lower() not in html_url.lower():
                     include_job = False
+            else:
+                # If the job doesn't have an HTML URL, we can't match the workflow
+                include_job = False
 
-            # Filter by job name pattern
-            if job_name_pattern and include_job:
+        # Filter by job name pattern - now we can use the enriched job name
+        if job_name_pattern and include_job:
+            job_name = job.get("name", "")
+            if job_name:
+                if not re.search(job_name_pattern, job_name, re.IGNORECASE):
+                    include_job = False
+            else:
+                # Fallback to URL-based extraction if name is still not available
                 html_url = job.get("htmlUrl", "")
                 if html_url:
                     parts = html_url.split("/")
@@ -266,18 +324,18 @@ async def get_filtered_jobs(repo_owner: str, repo_name: str, branch_or_commit_sh
                         if not re.search(job_name_pattern, job_name, re.IGNORECASE):
                             include_job = False
                 else:
-                    # If the job doesn't have an HTML URL, we can't match the pattern
+                    # If the job doesn't have a name or HTML URL, we can't match the pattern
                     include_job = False
 
-            if include_job:
-                filtered_jobs.append(job)
+        if include_job:
+            filtered_jobs.append(job)
 
-        total_jobs = len(filtered_jobs)
+    total_jobs = len(filtered_jobs)
 
-        # Apply pagination
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
-        filtered_jobs = filtered_jobs[start_idx:end_idx]
+    # Apply pagination
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    filtered_jobs = filtered_jobs[start_idx:end_idx]
 
     # Prepare basic commit info
     commit_info = {}
@@ -337,6 +395,8 @@ async def get_failure_details(repo_owner: str, repo_name: str, branch_or_commit_
     # Fetch data
     hud_data = api.get_hud_data(repo_owner, repo_name, branch_or_commit_sha, per_page=1)
 
+    # Get enriched jobs
+    enriched_jobs = enrich_hud_data(hud_data)
     failed_jobs = []
     total_failures = 0
 
@@ -351,46 +411,46 @@ async def get_failure_details(repo_owner: str, repo_name: str, branch_or_commit_
         "skipped": 0
     }
 
-    if "shaGrid" in hud_data and len(hud_data["shaGrid"]) > 0 and "jobs" in hud_data["shaGrid"][0]:
-        jobs = hud_data["shaGrid"][0]["jobs"]
-        job_status_counts["total"] = len(jobs)
+    # Update total count if we have jobs
+    job_status_counts["total"] = len(enriched_jobs)
 
-        # Count jobs by status for reporting
-        for job in jobs:
-            status = job.get("status", "unknown")
-            conclusion = job.get("conclusion", "unknown")
+    # Count jobs by status for reporting
+    for job in enriched_jobs:
+        status = job.get("status", "unknown")
+        conclusion = job.get("conclusion", "unknown")
 
-            # Only use job conclusion for determining status
-            if conclusion == "success":
-                job_status_counts["success"] += 1
-            elif conclusion == "failure":
-                job_status_counts["failure"] += 1
-                # Extract only the necessary information
-                failed_job = {
-                    "id": job.get("id"),
-                    "htmlUrl": job.get("htmlUrl", ""),
-                    "logUrl": job.get("logUrl", ""),
-                    "durationS": job.get("durationS", 0),
-                    "failureLines": job.get("failureLines", []),
-                    "failureCaptures": job.get("failureCaptures", []),
-                    "failureLineNumbers": job.get("failureLineNumbers", [])
-                }
-                failed_jobs.append(failed_job)
-            elif conclusion == "skipped":
-                job_status_counts["skipped"] += 1
-            elif status == "queued":
-                job_status_counts["queued"] += 1
-            elif status == "in_progress":
-                job_status_counts["in_progress"] += 1
-            elif conclusion == "pending" or status == "pending":
-                job_status_counts["pending"] += 1
+        # Only use job conclusion for determining status
+        if conclusion == "success":
+            job_status_counts["success"] += 1
+        elif conclusion == "failure":
+            job_status_counts["failure"] += 1
+            # Extract only the necessary information
+            failed_job = {
+                "id": job.get("id"),
+                "name": job.get("name", ""),  # Include enriched name
+                "htmlUrl": job.get("htmlUrl", ""),
+                "logUrl": job.get("logUrl", ""),
+                "durationS": job.get("durationS", 0),
+                "failureLines": job.get("failureLines", []),
+                "failureCaptures": job.get("failureCaptures", []),
+                "failureLineNumbers": job.get("failureLineNumbers", [])
+            }
+            failed_jobs.append(failed_job)
+        elif conclusion == "skipped":
+            job_status_counts["skipped"] += 1
+        elif status == "queued":
+            job_status_counts["queued"] += 1
+        elif status == "in_progress":
+            job_status_counts["in_progress"] += 1
+        elif conclusion == "pending" or status == "pending":
+            job_status_counts["pending"] += 1
 
-        total_failures = len(failed_jobs)
+    total_failures = len(failed_jobs)
 
-        # Apply pagination
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
-        failed_jobs = failed_jobs[start_idx:end_idx]
+    # Apply pagination
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    failed_jobs = failed_jobs[start_idx:end_idx]
 
     # Extract basic commit info
     commit_info = {}
@@ -501,75 +561,74 @@ async def get_workflow_summary(repo_owner: str, repo_name: str, branch_or_commit
     # Fetch data
     hud_data = api.get_hud_data(repo_owner, repo_name, branch_or_commit_sha, per_page=1)
 
+    # Get enriched jobs
+    enriched_jobs = enrich_hud_data(hud_data)
     workflows = {}
 
-    # Process job data if available
-    if "shaGrid" in hud_data and len(hud_data["shaGrid"]) > 0 and "jobs" in hud_data["shaGrid"][0]:
-        jobs = hud_data["shaGrid"][0]["jobs"]
+    for job in enriched_jobs:
+        html_url = job.get("htmlUrl", "")
+        if html_url:
+            # Extract workflow name from URL
+            parts = html_url.split("/")
+            if len(parts) > 4:
+                workflow_id = parts[-3]  # Extract workflow ID from URL
 
-        for job in jobs:
-            html_url = job.get("htmlUrl", "")
-            if html_url:
-                # Extract workflow name from URL
-                parts = html_url.split("/")
-                if len(parts) > 4:
-                    workflow_id = parts[-3]  # Extract workflow ID from URL
+                # Initialize workflow data if not exists
+                if workflow_id not in workflows:
+                    workflows[workflow_id] = {
+                        "name": workflow_id,
+                        "total_jobs": 0,
+                        "success": 0,
+                        "failure": 0,
+                        "skipped": 0,
+                        "pending": 0,
+                        "in_progress": 0,
+                        "total_duration": 0,
+                        "jobs": []
+                    }
 
-                    # Initialize workflow data if not exists
-                    if workflow_id not in workflows:
-                        workflows[workflow_id] = {
-                            "name": workflow_id,
-                            "total_jobs": 0,
-                            "success": 0,
-                            "failure": 0,
-                            "skipped": 0,
-                            "pending": 0,
-                            "in_progress": 0,
-                            "total_duration": 0,
-                            "jobs": []
-                        }
+                # Update workflow stats
+                workflow = workflows[workflow_id]
+                workflow["total_jobs"] += 1
 
-                    # Update workflow stats
-                    workflow = workflows[workflow_id]
-                    workflow["total_jobs"] += 1
+                status = job.get("status", "unknown")
+                conclusion = job.get("conclusion", "unknown")
 
-                    status = job.get("status", "unknown")
-                    conclusion = job.get("conclusion", "unknown")
+                # Only use conclusion for determining status
+                if conclusion == "success":
+                    workflow["success"] += 1
+                elif conclusion == "failure":
+                    workflow["failure"] += 1
+                elif conclusion == "skipped":
+                    workflow["skipped"] += 1
+                elif status == "in_progress":
+                    workflow["in_progress"] += 1
+                elif conclusion == "pending":
+                    workflow["pending"] += 1
 
-                    # Only use conclusion for determining status
-                    if conclusion == "success":
-                        workflow["success"] += 1
-                    elif conclusion == "failure":
-                        workflow["failure"] += 1
-                    elif conclusion == "skipped":
-                        workflow["skipped"] += 1
-                    elif status == "in_progress":
-                        workflow["in_progress"] += 1
-                    elif conclusion == "pending":
-                        workflow["pending"] += 1
+                # Add duration if available
+                duration = job.get("durationS", 0)
+                if duration and duration > 0:
+                    workflow["total_duration"] += duration
 
-                    # Add duration if available
-                    duration = job.get("durationS", 0)
-                    if duration and duration > 0:
-                        workflow["total_duration"] += duration
+                # Add job summary to the workflow with job name
+                workflow["jobs"].append({
+                    "id": job.get("id"),
+                    "name": job.get("name", ""),  # Include enriched name
+                    "conclusion": conclusion,
+                    "status": status,
+                    "duration": duration
+                })
 
-                    # Add job summary to the workflow
-                    workflow["jobs"].append({
-                        "id": job.get("id"),
-                        "conclusion": conclusion,
-                        "status": status,
-                        "duration": duration
-                    })
-
-        # Calculate average durations and success rates
-        for workflow_id, workflow in workflows.items():
-            completed_jobs = workflow["success"] + workflow["failure"]
-            if completed_jobs > 0:
-                workflow["avg_duration"] = workflow["total_duration"] / completed_jobs
-                workflow["success_rate"] = workflow["success"] / completed_jobs * 100
-            else:
-                workflow["avg_duration"] = 0
-                workflow["success_rate"] = 0
+    # Calculate average durations and success rates
+    for workflow_id, workflow in workflows.items():
+        completed_jobs = workflow["success"] + workflow["failure"]
+        if completed_jobs > 0:
+            workflow["avg_duration"] = workflow["total_duration"] / completed_jobs
+            workflow["success_rate"] = workflow["success"] / completed_jobs * 100
+        else:
+            workflow["avg_duration"] = 0
+            workflow["success_rate"] = 0
 
     # Extract basic commit info
     commit_info = {}
@@ -615,38 +674,47 @@ async def get_test_summary(repo_owner: str, repo_name: str, branch_or_commit_sha
         "failed_tests": [],
         "test_jobs": 0
     }
+    
+    # Get enriched jobs
+    enriched_jobs = enrich_hud_data(hud_data)
 
-    # Process job data if available
-    if "shaGrid" in hud_data and len(hud_data["shaGrid"]) > 0 and "jobs" in hud_data["shaGrid"][0]:
-        jobs = hud_data["shaGrid"][0]["jobs"]
+    for job in enriched_jobs:
+        # Get job name either from enriched field or URL
+        job_name = job.get("name", "")
+        html_url = job.get("htmlUrl", "")
+        
+        # Check if this is a test job by name or URL
+        is_test_job = False
+        if job_name and "test" in job_name.lower():
+            is_test_job = True
+        elif html_url and "test" in html_url.lower():
+            is_test_job = True
+            
+        if is_test_job:
+            test_summary["test_jobs"] = cast(int, test_summary["test_jobs"]) + 1
 
-        for job in jobs:
-            # Check if this is a test job (contains 'test' in URL)
-            html_url = job.get("htmlUrl", "")
-            if html_url and "test" in html_url.lower():
-                test_summary["test_jobs"] = cast(int, test_summary["test_jobs"]) + 1
+            # Check for explicit failures only
+            is_failure = job.get("conclusion") == "failure"
 
-                # Check for explicit failures only
-                is_failure = job.get("conclusion") == "failure"
+            if is_failure:
+                # Extract any test failure patterns
+                failure_lines = job.get("failureLines", [])
 
-                if is_failure:
-                    # Extract any test failure patterns
-                    failure_lines = job.get("failureLines", [])
+                # Look for test failure patterns
+                test_failure_pattern = re.compile(r"(FAIL|ERROR)(\s*:)?\s*(test\w+)", re.IGNORECASE)
 
-                    # Look for test failure patterns
-                    test_failure_pattern = re.compile(r"(FAIL|ERROR)(\s*:)?\s*(test\w+)", re.IGNORECASE)
-
-                    for line in failure_lines:
-                        match = test_failure_pattern.search(line)
-                        if match:
-                            test_name = match.group(3)
-                            test_failure = {
-                                "test_name": test_name,
-                                "job_id": job.get("id"),
-                                "job_url": html_url,
-                                "error_line": line
-                            }
-                            cast(List[Dict[str, Any]], test_summary["failed_tests"]).append(test_failure)
+                for line in failure_lines:
+                    match = test_failure_pattern.search(line)
+                    if match:
+                        test_name = match.group(3)
+                        test_failure = {
+                            "test_name": test_name,
+                            "job_id": job.get("id"),
+                            "job_name": job_name,  # Include enriched name
+                            "job_url": html_url,
+                            "error_line": line
+                        }
+                        cast(List[Dict[str, Any]], test_summary["failed_tests"]).append(test_failure)
 
     # Extract basic commit info
     commit_info = {}
