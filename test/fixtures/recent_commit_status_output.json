@@ -1,0 +1,97 @@
+{
+  "repo": "pytorch/pytorch",
+  "branch": "main",
+  "commits": [
+    {
+      "sha": "a7fe685be8b83c7bf0478c4b1dddf0c24f8d8790",
+      "short_sha": "a7fe685",
+      "title": "Add cpp wrapper skip to cudagraph logs (#148700)",
+      "author": "eellison",
+      "time": "2025-03-07T01:02:40Z",
+      "pr_num": 148700,
+      "job_counts": {
+        "total": 152,
+        "success": 62,
+        "failure": 1,
+        "pending": 75,
+        "skipped": 14
+      },
+      "status": "red",
+      "hud_url": "https://hud.pytorch.org/pytorch/pytorch/commit/a7fe685be8b83c7bf0478c4b1dddf0c24f8d8790"
+    },
+    {
+      "sha": "e3087f6d761d55dcaaac9a0477ef409b4d351879",
+      "short_sha": "e3087f6",
+      "title": "[ONNX] Improve verify_onnx_program to use VerificationInterpreter (#148706)",
+      "author": "justinchuby",
+      "time": "2025-03-07T00:40:54Z",
+      "pr_num": 148706,
+      "job_counts": {
+        "total": 178,
+        "success": 70,
+        "failure": 4,
+        "pending": 95,
+        "skipped": 9
+      },
+      "status": "red",
+      "hud_url": "https://hud.pytorch.org/pytorch/pytorch/commit/e3087f6d761d55dcaaac9a0477ef409b4d351879"
+    },
+    {
+      "sha": "50eb4f39905e32b05ad289524e8d2f6adc41c33e",
+      "short_sha": "50eb4f3",
+      "title": "Enable UBSAN test (#147511)",
+      "author": "cyyever",
+      "time": "2025-03-07T00:35:32Z",
+      "pr_num": 147511,
+      "job_counts": {
+        "total": 174,
+        "success": 70,
+        "failure": 3,
+        "pending": 92,
+        "skipped": 9
+      },
+      "status": "red",
+      "hud_url": "https://hud.pytorch.org/pytorch/pytorch/commit/50eb4f39905e32b05ad289524e8d2f6adc41c33e"
+    },
+    {
+      "sha": "33a285379af022eb4dbbce0a72e6fe840dc8c480",
+      "short_sha": "33a2853",
+      "title": "[codemod] Remove unused-variable in caffe2/torch/csrc/distributed/c10d/cuda/AsyncMM.cu (#148501)",
+      "author": "r-barnes",
+      "time": "2025-03-07T00:33:39Z",
+      "pr_num": 148501,
+      "job_counts": {
+        "total": 178,
+        "success": 70,
+        "failure": 4,
+        "pending": 95,
+        "skipped": 9
+      },
+      "status": "red",
+      "hud_url": "https://hud.pytorch.org/pytorch/pytorch/commit/33a285379af022eb4dbbce0a72e6fe840dc8c480"
+    },
+    {
+      "sha": "a0bc6d81bbba5f19a4e4a88fbacf10b323a97007",
+      "short_sha": "a0bc6d8",
+      "title": "[CI][CUDA] Move away from cuda12.4, Add cuda12.6 eager CI tests (#148602)",
+      "author": "tinglvv",
+      "time": "2025-03-07T00:15:04Z",
+      "pr_num": 148602,
+      "job_counts": {
+        "total": 217,
+        "success": 100,
+        "failure": 5,
+        "pending": 103,
+        "skipped": 9
+      },
+      "status": "red",
+      "hud_url": "https://hud.pytorch.org/pytorch/pytorch/commit/a0bc6d81bbba5f19a4e4a88fbacf10b323a97007"
+    }
+  ],
+  "summary": {
+    "total_commits": 5,
+    "red_commits": 5,
+    "green_commits": 0,
+    "pending_commits": 0
+  }
+}
