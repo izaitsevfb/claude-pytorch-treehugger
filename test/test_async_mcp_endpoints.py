@@ -11,89 +11,165 @@ import json
 import unittest
 from unittest.mock import patch
 
-# Import the async functions
-
 # Import the resource endpoints from MCP server
 from pytorch_hud.server.mcp_server import (
     get_hud_data_resource, get_commit_summary_resource, get_job_summary_resource,
-    get_filtered_jobs_resource, get_failure_details_resource, get_job_details_resource,
-    get_workflow_summary_resource, get_test_summary_resource
+    get_job_details_resource, get_test_summary_resource, get_recent_commits_with_jobs_resource
 )
 
 class TestAsyncMCPEndpoints(unittest.IsolatedAsyncioTestCase):
     """Tests for the async MCP resource endpoints."""
 
-    @patch('pytorch_hud.server.mcp_server.get_filtered_jobs')
-    async def test_filtered_jobs_resource(self, mock_get_filtered_jobs):
-        """Test that the filtered_jobs_resource properly awaits the async function."""
-        # Create mock return value
+    @patch('pytorch_hud.server.mcp_server.get_recent_commits_with_jobs')
+    async def test_recent_commits_with_jobs_resource(self, mock_get_recent_commits):
+        """Test that the universal resource endpoint properly awaits the async function."""
+        # Create mock return value that contains filtered jobs
         mock_result = {
-            "commit": {"sha": "abcdef", "title": "Test Commit", "author": "test-user"},
-            "jobs": [{"id": "job1"}, {"id": "job2"}],
-            "pagination": {"page": 1, "per_page": 20, "total_items": 2},
-            "filters": {"status": "failure", "workflow": None, "job_name_pattern": None}
-        }
-        
-        # Set up mock to return our sample data
-        mock_get_filtered_jobs.return_value = mock_result
-        
-        # Call the resource endpoint
-        result = await get_filtered_jobs_resource(
-            "pytorch", "pytorch", "main", 
-            status="failure", page=1, per_page=20
-        )
-        
-        # Verify the resource endpoint was called with the correct arguments
-        mock_get_filtered_jobs.assert_called_once_with(
-            "pytorch", "pytorch", "main",
-            status="failure", workflow=None, job_name_pattern=None, 
-            page=1, per_page=20, ctx=None
-        )
-        
-        # Result should be a JSON string - parse it back to verify contents
-        result_data = json.loads(result)
-        
-        # Check that it contains the expected fields
-        self.assertIn("jobs", result_data)
-        self.assertEqual(len(result_data["jobs"]), 2)
-
-    @patch('pytorch_hud.server.mcp_server.get_failure_details')
-    async def test_failure_details_resource(self, mock_get_failure_details):
-        """Test that the failure_details_resource properly awaits the async function."""
-        # Create mock return value
-        mock_result = {
-            "commit": {"sha": "abcdef", "title": "Test Commit", "author": "test-user"},
-            "build_status": "failing",
-            "job_status_counts": {"total": 3, "success": 1, "failure": 2},
-            "failed_jobs": [
-                {"id": "job1", "failureLines": ["Error 1", "Error 2"]},
-                {"id": "job2", "failureLines": ["Error 3"]}
+            "repo": "pytorch/pytorch",
+            "branch_or_commit_sha": "main",
+            "commits": [
+                {
+                    "sha": "abcdef",
+                    "title": "Test Commit",
+                    "author": "test-user",
+                    "status": "red",
+                    "job_counts": {
+                        "total": 5,
+                        "success": 3,
+                        "failure": 2
+                    },
+                    "jobs": [
+                        {"id": "job1", "name": "test_job1", "conclusion": "failure"},
+                        {"id": "job2", "name": "test_job2", "conclusion": "failure"}
+                    ]
+                }
             ],
-            "total_failures": 2,
-            "pagination": {"page": 1, "per_page": 10, "total_items": 2}
+            "pagination": {
+                "page": 1,
+                "per_page": 10,
+                "total_commits": 1,
+                "returned_commits": 1
+            },
+            "filters": {
+                "include_success": False,
+                "include_pending": False,
+                "include_failures": True, 
+                "job_name_filter_regex": None
+            },
+            "_metadata": {
+                "timestamp": "2025-03-07T12:00:00Z"
+            }
         }
         
         # Set up mock to return our sample data
-        mock_get_failure_details.return_value = mock_result
+        mock_get_recent_commits.return_value = mock_result
         
-        # Call the resource endpoint
-        result = await get_failure_details_resource(
+        # Call the universal resource endpoint with failure filter
+        result = await get_recent_commits_with_jobs_resource(
             "pytorch", "pytorch", "main", 
-            page=1, per_page=10
+            include_success=False,
+            include_pending=False,
+            include_failures=True,
+            page=1, 
+            per_page=10
         )
         
         # Verify the resource endpoint was called with the correct arguments
-        mock_get_failure_details.assert_called_once_with(
-            "pytorch", "pytorch", "main",
-            page=1, per_page=10, ctx=None
+        mock_get_recent_commits.assert_called_once_with(
+            repo_owner="pytorch", 
+            repo_name="pytorch", 
+            branch_or_commit_sha="main",
+            include_success=False,
+            include_pending=False,
+            include_failures=True,
+            include_commit_details=True,
+            job_name_filter_regex=None,
+            failure_line_filter_regex=None,
+            page=1, 
+            per_page=10,
+            ctx=None
         )
         
         # Result should be a JSON string - parse it back to verify contents
         result_data = json.loads(result)
         
-        # Check that it contains the expected fields
-        self.assertIn("failed_jobs", result_data)
-        self.assertEqual(len(result_data["failed_jobs"]), 2)
+        # Check that it contains the expected fields for filtered jobs
+        self.assertIn("commits", result_data)
+        self.assertEqual(len(result_data["commits"]), 1)
+        self.assertEqual(len(result_data["commits"][0]["jobs"]), 2)
+        
+        # Reset mock for next test
+        mock_get_recent_commits.reset_mock()
+        
+        # Create mock return value that contains only commit data (no jobs)
+        mock_result_commits = {
+            "repo": "pytorch/pytorch",
+            "branch_or_commit_sha": "main",
+            "commits": [
+                {
+                    "sha": "commit1",
+                    "title": "Test Commit 1",
+                    "author": "test-user",
+                    "status": "green",
+                    "job_counts": {"total": 10, "success": 10}
+                },
+                {
+                    "sha": "commit2",
+                    "title": "Test Commit 2",
+                    "author": "test-user",
+                    "status": "red",
+                    "job_counts": {"total": 8, "success": 5, "failure": 3}
+                }
+            ],
+            "pagination": {
+                "page": 1,
+                "per_page": 10,
+                "total_commits": 2,
+                "returned_commits": 2
+            },
+            "_metadata": {
+                "timestamp": "2025-03-07T12:00:00Z"
+            }
+        }
+        
+        # Set up mock to return our commit data sample
+        mock_get_recent_commits.return_value = mock_result_commits
+        
+        # Call the resource endpoint for recent commit status only
+        result = await get_recent_commits_with_jobs_resource(
+            "pytorch", "pytorch", "main", 
+            include_success=False,
+            include_pending=False,
+            include_failures=False,
+            page=1, 
+            per_page=10
+        )
+        
+        # Verify the resource endpoint was called with the correct arguments
+        mock_get_recent_commits.assert_called_once_with(
+            repo_owner="pytorch", 
+            repo_name="pytorch", 
+            branch_or_commit_sha="main",
+            include_success=False,
+            include_pending=False,
+            include_failures=False,
+            include_commit_details=True,
+            job_name_filter_regex=None,
+            failure_line_filter_regex=None,
+            page=1, 
+            per_page=10,
+            ctx=None
+        )
+        
+        # Result should be a JSON string - parse it back to verify contents
+        result_data = json.loads(result)
+        
+        # Check that it contains the expected fields for commit status
+        self.assertIn("commits", result_data)
+        self.assertEqual(len(result_data["commits"]), 2)
+        
+        # The commits shouldn't have job details since we didn't request them
+        self.assertNotIn("jobs", result_data["commits"][0])
 
     @patch('pytorch_hud.server.mcp_server.get_job_details')
     async def test_job_details_resource(self, mock_get_job_details):
@@ -184,47 +260,6 @@ class TestAsyncMCPEndpoints(unittest.IsolatedAsyncioTestCase):
         # Check that it contains the expected fields
         self.assertIn("status_counts", result_data)
         self.assertEqual(result_data["status_counts"]["total"], 13)
-
-    @patch('pytorch_hud.server.mcp_server.get_workflow_summary')
-    async def test_workflow_summary_resource(self, mock_get_workflow_summary):
-        """Test that the workflow_summary_resource properly awaits the async function."""
-        # Create mock return value
-        mock_result = {
-            "commit": {"sha": "abcdef", "title": "Test Commit", "author": "test-user"},
-            "workflows": [
-                {
-                    "name": "workflow1",
-                    "total_jobs": 5,
-                    "success": 4,
-                    "failure": 1,
-                    "avg_duration": 120.5
-                },
-                {
-                    "name": "workflow2",
-                    "total_jobs": 3,
-                    "success": 3,
-                    "failure": 0,
-                    "avg_duration": 90.0
-                }
-            ],
-            "total_workflows": 2
-        }
-        
-        # Set up mock to return our sample data
-        mock_get_workflow_summary.return_value = mock_result
-        
-        # Call the resource endpoint
-        result = await get_workflow_summary_resource("pytorch", "pytorch", "main")
-        
-        # Verify the resource endpoint was called with the correct arguments
-        mock_get_workflow_summary.assert_called_once_with("pytorch", "pytorch", "main", ctx=None)
-        
-        # Result should be a JSON string - parse it back to verify contents
-        result_data = json.loads(result)
-        
-        # Check that it contains the expected fields
-        self.assertIn("workflows", result_data)
-        self.assertEqual(len(result_data["workflows"]), 2)
 
     @patch('pytorch_hud.server.mcp_server.get_test_summary')
     async def test_test_summary_resource(self, mock_get_test_summary):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test script specifically for validating the job status counting logic in 
-the get_recent_commit_status function.
+the get_recent_commits_with_jobs function.
 
 This test uses sample JSON responses to verify proper parsing.
 """
@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 # Import function directly for testing
-from pytorch_hud.server.mcp_server import get_recent_commit_status
+from pytorch_hud.tools.hud_data import get_recent_commits_with_jobs
 
 # Load sample data from fixtures directory
 def load_sample_data():
@@ -19,7 +19,7 @@ def load_sample_data():
         return json.load(f)
 
 class TestRecentCommitStatusParsing(unittest.IsolatedAsyncioTestCase):
-    """Tests job status counting mechanism of get_recent_commit_status."""
+    """Tests job status counting mechanism of get_recent_commits_with_jobs."""
 
     def setUp(self):
         """Load sample data for tests."""
@@ -62,15 +62,23 @@ class TestRecentCommitStatusParsing(unittest.IsolatedAsyncioTestCase):
         
     async def test_job_status_counting_from_sample(self):
         """Test job status counting using our sample data."""
-        with patch('pytorch_hud.server.mcp_server.get_commit_summary') as mock_get_commit_summary, \
-             patch('pytorch_hud.server.mcp_server.api.get_hud_data') as mock_get_hud_data:
+        with patch('pytorch_hud.tools.hud_data.api.get_hud_data') as mock_get_hud_data:
             
-            # Setup mocks
-            mock_get_commit_summary.return_value = self.commit_summary_sample
+            # Set up the hud_data mock to return our sample
             mock_get_hud_data.return_value = self.hud_sample
             
-            # Call the function
-            result = await get_recent_commit_status("pytorch", "pytorch", count=1)
+            # Include all the job info
+            self.hud_sample["jobNames"] = ["job1", "job2", "job3"] # Add some job names
+            
+            # Call the function - don't include job details to simplify test
+            result = await get_recent_commits_with_jobs(
+                repo_owner="pytorch", 
+                repo_name="pytorch", 
+                per_page=1,
+                include_success=False,
+                include_pending=False,
+                include_failures=False
+            )
             
             # Verify job counts are correctly calculated
             job_counts = result["commits"][0]["job_counts"]
@@ -100,15 +108,23 @@ class TestRecentCommitStatusParsing(unittest.IsolatedAsyncioTestCase):
         
     async def test_test_failures_counted(self):
         """Test that jobs with test failures are properly counted as failures."""
-        with patch('pytorch_hud.server.mcp_server.get_commit_summary') as mock_get_commit_summary, \
-             patch('pytorch_hud.server.mcp_server.api.get_hud_data') as mock_get_hud_data:
+        with patch('pytorch_hud.tools.hud_data.api.get_hud_data') as mock_get_hud_data:
             
-            # Setup mocks
-            mock_get_commit_summary.return_value = self.commit_summary_sample
+            # Add job names to sample
+            self.test_failures_sample["jobNames"] = ["job1", "job2", "job3", "job4", "job5"]
+            
+            # Setup mock
             mock_get_hud_data.return_value = self.test_failures_sample
             
-            # Call the function
-            result = await get_recent_commit_status("pytorch", "pytorch", count=1)
+            # Call the function - don't include job details to simplify test
+            result = await get_recent_commits_with_jobs(
+                repo_owner="pytorch", 
+                repo_name="pytorch", 
+                per_page=1,
+                include_success=False,
+                include_pending=False,
+                include_failures=False
+            )
             
             # Verify job counts
             job_counts = result["commits"][0]["job_counts"]
@@ -130,11 +146,7 @@ class TestRecentCommitStatusParsing(unittest.IsolatedAsyncioTestCase):
         
     async def test_empty_jobs_handled(self):
         """Test that commits with no jobs are handled gracefully."""
-        with patch('pytorch_hud.server.mcp_server.get_commit_summary') as mock_get_commit_summary, \
-             patch('pytorch_hud.server.mcp_server.api.get_hud_data') as mock_get_hud_data:
-            
-            # Setup mocks
-            mock_get_commit_summary.return_value = self.commit_summary_sample
+        with patch('pytorch_hud.tools.hud_data.api.get_hud_data') as mock_get_hud_data:
             
             # Create a sample with no jobs
             empty_jobs_sample = {
@@ -147,12 +159,20 @@ class TestRecentCommitStatusParsing(unittest.IsolatedAsyncioTestCase):
                         "prNum": 12345,
                         "jobs": []
                     }
-                ]
+                ],
+                "jobNames": []
             }
             mock_get_hud_data.return_value = empty_jobs_sample
             
             # Call the function
-            result = await get_recent_commit_status("pytorch", "pytorch", count=1)
+            result = await get_recent_commits_with_jobs(
+                repo_owner="pytorch", 
+                repo_name="pytorch", 
+                per_page=1,
+                include_success=False,
+                include_pending=False,
+                include_failures=False
+            )
             
             # Verify job counts
             job_counts = result["commits"][0]["job_counts"]
@@ -167,16 +187,12 @@ class TestRecentCommitStatusParsing(unittest.IsolatedAsyncioTestCase):
             # Status should be unknown
             self.assertEqual(result["commits"][0]["status"], "unknown")
         
-    async def test_include_pending_parameter(self):
-        """Test that the include_pending parameter works correctly."""
-        with patch('pytorch_hud.server.mcp_server.get_commit_summary') as mock_get_commit_summary, \
-             patch('pytorch_hud.server.mcp_server.api.get_hud_data') as mock_get_hud_data:
+    async def test_job_filtering_parameters(self):
+        """Test that the job filtering parameters work correctly."""
+        with patch('pytorch_hud.tools.hud_data.api.get_hud_data') as mock_get_hud_data:
             
-            # Setup mocks
-            mock_get_commit_summary.return_value = self.commit_summary_sample
-            
-            # Create a sample with only pending jobs
-            pending_jobs_sample = {
+            # Create a sample with mixed job types
+            mixed_jobs_sample = {
                 "shaGrid": [
                     {
                         "sha": "abcd1234",
@@ -186,28 +202,55 @@ class TestRecentCommitStatusParsing(unittest.IsolatedAsyncioTestCase):
                         "prNum": 12345,
                         "jobs": [
                             {"id": "job1", "status": "in_progress", "conclusion": "pending"},
-                            {"id": "job2", "status": "queued", "conclusion": None}
+                            {"id": "job2", "status": "queued", "conclusion": None},
+                            {"id": "job3", "status": "completed", "conclusion": "success"},
+                            {"id": "job4", "status": "completed", "conclusion": "failure"}
                         ]
                     }
-                ]
+                ],
+                "jobNames": ["job1", "job2", "job3", "job4"]
             }
-            mock_get_hud_data.return_value = pending_jobs_sample
+            mock_get_hud_data.return_value = mixed_jobs_sample
             
-            # Test with include_pending=True (default)
-            result_with_pending = await get_recent_commit_status("pytorch", "pytorch", count=1, include_pending=True)
+            # Test with just success jobs included
+            result_success = await get_recent_commits_with_jobs(
+                repo_owner="pytorch",
+                repo_name="pytorch",
+                per_page=1,
+                include_success=True,
+                include_pending=False,
+                include_failures=False
+            )
             
-            # Status should be pending
-            self.assertEqual(result_with_pending["commits"][0]["status"], "pending")
+            # There should be one commit with only success jobs
+            self.assertEqual(len(result_success["commits"]), 1)
+            if "jobs" in result_success["commits"][0]:
+                # All jobs should be success
+                job_conclusions = [job.get("conclusion") for job in result_success["commits"][0]["jobs"]]
+                self.assertTrue(all(c == "success" for c in job_conclusions))
+                self.assertEqual(len(result_success["commits"][0]["jobs"]), 1)
             
-            # Test with include_pending=False
-            result_without_pending = await get_recent_commit_status("pytorch", "pytorch", count=1, include_pending=False)
+            # Test with just failure jobs included
+            result_failures = await get_recent_commits_with_jobs(
+                repo_owner="pytorch",
+                repo_name="pytorch",
+                per_page=1,
+                include_success=False,
+                include_pending=False,
+                include_failures=True
+            )
             
-            # Status should be unknown since we're ignoring pending jobs
-            self.assertEqual(result_without_pending["commits"][0]["status"], "unknown")
-            
-            # Job counts should be the same in both cases
-            self.assertEqual(result_with_pending["commits"][0]["job_counts"], 
-                            result_without_pending["commits"][0]["job_counts"])
+            # There should be one commit with only failure jobs
+            self.assertEqual(len(result_failures["commits"]), 1)
+            if "jobs" in result_failures["commits"][0]:
+                # All jobs should be failures
+                job_conclusions = [job.get("conclusion") for job in result_failures["commits"][0]["jobs"]]
+                self.assertTrue(all(c == "failure" for c in job_conclusions))
+                self.assertEqual(len(result_failures["commits"][0]["jobs"]), 1)
+                
+            # Job counts should be the same in both cases (since they're based on all jobs)
+            self.assertEqual(result_success["commits"][0]["job_counts"]["total"], 4)
+            self.assertEqual(result_failures["commits"][0]["job_counts"]["total"], 4)
 
 if __name__ == "__main__":
     import asyncio

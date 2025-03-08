@@ -12,7 +12,7 @@ import requests
 from unittest.mock import patch
 
 from pytorch_hud.tools.hud_data import get_failure_details
-from pytorch_hud.server.mcp_server import get_failure_details_resource
+from pytorch_hud.server.mcp_server import get_recent_commits_with_jobs_resource
 
 class TestFailureDetails(unittest.IsolatedAsyncioTestCase):
     """Tests for the get_failure_details function."""
@@ -119,65 +119,116 @@ class TestFailureDetails(unittest.IsolatedAsyncioTestCase):
         # Build status should be "passing" due to no failures
         self.assertEqual(result["build_status"], "passing")
 
-    @patch('pytorch_hud.server.mcp_server.get_failure_details')
-    async def test_failure_details_resource(self, mock_get_failure_details):
-        """Test that the failure_details_resource properly awaits the async function."""
-        # Create mock return value for get_failure_details
-        mock_failure_details = {
-            "commit": {"sha": "abcdef", "title": "Test Commit", "author": "test-user"},
-            "build_status": "failing",
-            "job_status_counts": {"total": 3, "success": 1, "failure": 2},
-            "failed_jobs": [
-                {"id": "job1", "failureLines": ["Error 1", "Error 2"]},
-                {"id": "job2", "failureLines": ["Error 3"]}
+    @patch('pytorch_hud.server.mcp_server.get_recent_commits_with_jobs')
+    async def test_failure_details_resource(self, mock_get_recent_commits):
+        """Test that the resource endpoint properly awaits the async function for failure details."""
+        # Create mock return value that looks like get_recent_commits_with_jobs output
+        mock_result = {
+            "repo": "pytorch/pytorch",
+            "branch_or_commit_sha": "main",
+            "commits": [
+                {
+                    "sha": "abcdef",
+                    "title": "Test Commit",
+                    "author": "test-user",
+                    "status": "red",
+                    "job_counts": {
+                        "total": 3,
+                        "success": 1,
+                        "failure": 2
+                    },
+                    "jobs": [
+                        {"id": "job1", "name": "test_job1", "conclusion": "failure", "failureLines": ["Error 1", "Error 2"]},
+                        {"id": "job2", "name": "test_job2", "conclusion": "failure", "failureLines": ["Error 3"]}
+                    ]
+                }
             ],
-            "total_failures": 2,
-            "pagination": {"page": 1, "per_page": 10, "total_items": 2}
+            "pagination": {
+                "page": 1,
+                "per_page": 10,
+                "total_commits": 1,
+                "returned_commits": 1
+            },
+            "filters": {
+                "include_success": False,
+                "include_pending": False,
+                "include_failures": True
+            },
+            "_metadata": {
+                "timestamp": "2025-03-07T12:00:00Z"
+            }
         }
         
         # Set up mock to return our sample data
-        mock_get_failure_details.return_value = mock_failure_details
+        mock_get_recent_commits.return_value = mock_result
         
-        # Call the resource endpoint
-        result = await get_failure_details_resource(
-            "pytorch", "pytorch", "main", 
-            page=1, per_page=10
+        # Call the resource endpoint with failure filter
+        result = await get_recent_commits_with_jobs_resource(
+            "pytorch", "pytorch", "main",
+            include_success=False,
+            include_pending=False,
+            include_failures=True,
+            page=1, 
+            per_page=10
         )
         
         # Verify the resource endpoint was called with the correct arguments
-        mock_get_failure_details.assert_called_once_with(
-            "pytorch", "pytorch", "main",
-            page=1, per_page=10, ctx=None
+        mock_get_recent_commits.assert_called_once_with(
+            repo_owner="pytorch",
+            repo_name="pytorch",
+            branch_or_commit_sha="main",
+            include_success=False,
+            include_pending=False,
+            include_failures=True,
+            include_commit_details=True,
+            job_name_filter_regex=None,
+            failure_line_filter_regex=None,
+            page=1, 
+            per_page=10,
+            ctx=None
         )
         
         # Result should be a JSON string - parse it back to verify contents
         result_data = json.loads(result)
         
-        # Check that it contains the expected fields
-        self.assertIn("failed_jobs", result_data)
-        self.assertEqual(len(result_data["failed_jobs"]), 2)
+        # Check that it contains the expected fields - failures would be in the commits[0].jobs
+        self.assertIn("commits", result_data)
+        self.assertEqual(len(result_data["commits"]), 1)
+        self.assertIn("jobs", result_data["commits"][0])
+        self.assertEqual(len(result_data["commits"][0]["jobs"]), 2)
         
         # Reset the mock for the second test
-        mock_get_failure_details.reset_mock()
-        mock_get_failure_details.return_value = mock_failure_details
+        mock_get_recent_commits.reset_mock()
         
-        # Include_lines parameter should handle failure line filtering
-        result_summary = await get_failure_details_resource(
-            "pytorch", "pytorch", "main", 
-            page=1, per_page=10, include_lines="summary"
-        )
+        # Use failure line filter regex to simulate the include_lines="summary" feature
+        mock_get_recent_commits.return_value = mock_result
         
-        # Verify called again with the same arguments
-        mock_get_failure_details.assert_called_once_with(
+        # Call the endpoint but we don't need to check the returned value
+        await get_recent_commits_with_jobs_resource(
             "pytorch", "pytorch", "main",
-            page=1, per_page=10, ctx=None
+            include_success=False,
+            include_pending=False,
+            include_failures=True,
+            failure_line_filter_regex="^Error",  # This should filter to just the first error line
+            page=1, 
+            per_page=10
         )
         
-        # Parse result to verify that only first failure line was included
-        summary_data = json.loads(result_summary)
-        for job in summary_data["failed_jobs"]:
-            self.assertEqual(len(job["failureLines"]), 1, 
-                            "With include_lines=summary, each job should have only one failure line")
+        # Verify called again with the proper arguments including the failure line filter
+        mock_get_recent_commits.assert_called_once_with(
+            repo_owner="pytorch",
+            repo_name="pytorch",
+            branch_or_commit_sha="main",
+            include_success=False,
+            include_pending=False,
+            include_failures=True,
+            include_commit_details=True,
+            job_name_filter_regex=None,
+            failure_line_filter_regex="^Error",
+            page=1, 
+            per_page=10,
+            ctx=None
+        )
 
 
 class TestFailureDetailsResourceHTTP(unittest.TestCase):
@@ -200,16 +251,17 @@ class TestFailureDetailsResourceHTTP(unittest.TestCase):
         if not self.server_running:
             self.skipTest("MCP server is not running")
             
-        # Make request to failure details resource endpoint
+        # Make request to the universal resource endpoint for failures
         response = requests.post(
-            "http://localhost:8000/tools/get_failure_details_resource",
+            "http://localhost:8000/tools/get_recent_commits_with_jobs_resource",
             json={
                 "repo_owner": "pytorch",
                 "repo_name": "pytorch",
-                "branch": "main",
-                "commit_sha": "3960f978325222392d89ecdeb0d5baf968f654a7",
-                "per_page": "5",
-                "include_lines": "summary"
+                "branch_or_commit_sha": "3960f978325222392d89ecdeb0d5baf968f654a7",
+                "include_failures": True,
+                "include_success": False,
+                "include_pending": False,
+                "per_page": 5
             }
         )
         
@@ -220,12 +272,15 @@ class TestFailureDetailsResourceHTTP(unittest.TestCase):
         # Basic validation of structure
         self.assertIn("result", result)
         data = json.loads(result["result"])
-        self.assertIn("failed_jobs", data)
+        self.assertIn("commits", data)
         
-        # With include_lines=summary, each job should have at most one failure line
-        for job in data["failed_jobs"]:
-            if "failureLines" in job:
-                self.assertLessEqual(len(job["failureLines"]), 1)
+        # Check if we have any commits with jobs
+        if data["commits"] and len(data["commits"]) > 0:
+            # Check if the first commit has jobs
+            if "jobs" in data["commits"][0]:
+                # With job filtering, we should only see failure jobs
+                for job in data["commits"][0]["jobs"]:
+                    self.assertEqual(job.get("conclusion"), "failure")
 
 
 if __name__ == "__main__":

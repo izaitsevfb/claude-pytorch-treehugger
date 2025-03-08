@@ -8,14 +8,13 @@ CI issues, analyzing logs, and querying data from ClickHouse.
 
 import json
 from typing import Optional, Any, Dict
-from datetime import datetime
 from mcp.server.fastmcp import FastMCP, Context
 
 from pytorch_hud.api.client import PyTorchHudAPI
 from pytorch_hud.api.utils import parse_time_range
 from pytorch_hud.tools.hud_data import (
-    get_commit_summary, get_job_summary, get_filtered_jobs,
-    get_failure_details, get_job_details, get_workflow_summary, get_test_summary
+    get_commit_summary, get_job_summary, get_job_details, get_test_summary,
+    get_recent_commits_with_jobs
 )
 from pytorch_hud.log_analysis.tools import (
     get_artifacts, get_s3_log_url, get_utilization_metadata, search_logs,
@@ -260,203 +259,42 @@ async def get_job_summary_resource(repo_owner: str, repo_name: str, branch_or_co
     return safe_json_dumps(job_summary, indent=2)
 
 
-@mcp.tool()
-async def get_filtered_jobs_resource(repo_owner: str, repo_name: str, branch_or_commit_sha: str,
-                                     status: Optional[str] = None,
-                                     workflow: Optional[str] = None,
-                                     job_name_pattern: Optional[str] = None,
-                                     page: int = 1,
-                                     per_page: int = 20,
-                                     fields: Optional[str] = None,
-                                     ctx: Optional[Context] = None
-                                     ) -> str:
-    """Get jobs with filtering options.
+# The get_filtered_jobs_resource function has been replaced by the more flexible
+# get_recent_commits_with_jobs_resource function.
+# 
+# For equivalent functionality, use:
+# get_recent_commits_with_jobs_resource(
+#     repo_owner=repo_owner,
+#     repo_name=repo_name,
+#     branch_or_commit_sha=branch_or_commit_sha,
+#     include_success=True if status=="success" else False,
+#     include_pending=True if status=="pending" else False,
+#     include_failures=True if status=="failure" else False, 
+#     job_name_filter_regex=job_name_pattern,
+#     page=page,
+#     per_page=per_page
+# )
 
-    Returns a filtered list of jobs based on status, workflow name, or job name pattern.
-    This helps reduce context window usage by returning only the jobs you're interested in.
-
-    Parameters:
-        repo_owner: Repository owner (e.g., 'pytorch')
-        repo_name: Repository name (e.g., 'pytorch')
-        branch_or_commit_sha: Branch name (e.g., 'main') or commit SHA
-            - When passing a branch name like 'main', returns data for the latest commit on that branch
-            - When passing a full commit SHA, returns data for that specific commit
-
-    Query parameters:
-        status: Filter by job status/conclusion (e.g., 'success', 'failure', 'pending', 'skipped')
-          - Returns only jobs matching this status
-
-        workflow: Filter by workflow name (e.g., 'linux-build')
-          - Substring matching, can be partial name
-
-        job_name_pattern: Filter by job name pattern (e.g., 'test', 'build')
-          - Supports regex pattern matching on job names
-
-        page: Page number for pagination (default: 1)
-
-        per_page: Number of items per page (default: 20)
-          - Recommended range: 5-20 to avoid context overload
-
-        fields: Comma-separated list of fields to include (default: all)
-          - Available: 'commit', 'jobs', 'pagination', 'filters'
-          - Omit fields to reduce response size
-
-    Returns:
-        JSON with filtered job list and pagination info
-    """
-    # Parse fields parameter
-    all_fields = ['commit', 'jobs', 'pagination', 'filters']
-    included_fields = all_fields
-    if fields is not None:
-        field_list = [f.strip() for f in fields.split(',')]
-        if field_list:
-            included_fields = field_list
-
-    # Use integer parameters directly - no conversion needed
-    filtered_jobs = await get_filtered_jobs(
-        repo_owner, repo_name, branch_or_commit_sha,
-        status=status, workflow=workflow, job_name_pattern=job_name_pattern,
-        page=page, per_page=per_page, ctx=ctx
-    )
-
-    # Filter response based on requested fields
-    result = {}
-    for field in included_fields:
-        if field == 'commit' and 'commit' in filtered_jobs:
-            result['commit'] = filtered_jobs['commit']
-        elif field == 'jobs' and 'jobs' in filtered_jobs:
-            result['jobs'] = filtered_jobs['jobs']
-        elif field == 'pagination' and 'pagination' in filtered_jobs:
-            result['pagination'] = filtered_jobs['pagination']
-        elif field == 'filters' and 'filters' in filtered_jobs:
-            result['filters'] = filtered_jobs['filters']
-
-    # Add size hints
-    if 'jobs' in result:
-        result['_size_hint'] = {
-            "job_count": len(result.get("jobs", [])),
-            "per_page": per_page,
-            "recommended_max": 15
-        }
-
-    return safe_json_dumps(result, indent=2)
-
-@mcp.tool()
-async def get_failure_details_resource(repo_owner: str, repo_name: str, branch_or_commit_sha: str,
-                                     page: int = 1,
-                                     per_page: int = 10,
-                                     fields: Optional[str] = None,
-                                     include_lines: Optional[str] = None,
-                                     ctx: Optional[Context] = None) -> str:
-    """Get only the failing jobs with detailed failure information.
-
-    This specialized endpoint returns only jobs that have failed, along with their
-    failure details (error messages, stack traces, etc.), making it ideal for debugging.
-
-    Parameters:
-        repo_owner: Repository owner (e.g., 'pytorch')
-        repo_name: Repository name (e.g., 'pytorch')
-        branch_or_commit_sha: Branch name (e.g., 'main') or commit SHA
-            - When passing a branch name like 'main', returns data for the latest commit on that branch
-            - When passing a full commit SHA, returns data for that specific commit
-
-    Query parameters:
-        page: Page number for pagination (default: 1)
-
-        per_page: Number of items per page (default: 10)
-          - Recommended range: 5-15 for most use cases
-
-        fields: Comma-separated list of fields to include (default: all)
-          - Available: 'commit', 'failed_jobs', 'total_failures', 'pagination'
-          - Example: fields=failed_jobs,total_failures
-
-        include_lines: Control which failure lines to include (default: 'all')
-          - 'all': Include all failure information
-          - 'summary': Include only the first failure line for each job
-          - 'none': Exclude failure lines completely
-
-    Returns:
-        JSON with failed jobs and their failure details
-    """
-    # Parse fields parameter
-    all_fields = ['commit', 'failed_jobs', 'total_failures', 'pagination']
-    included_fields = all_fields
-    if fields is not None:
-        field_list = [f.strip() for f in fields.split(',')]
-        if field_list:
-            included_fields = field_list
-
-    # Use integer parameters directly - no conversion needed
-    failure_details = await get_failure_details(
-        repo_owner, repo_name, branch_or_commit_sha,
-        page=page, per_page=per_page,
-        ctx=ctx
-    )
-
-    # Filter response based on requested fields
-    result = {}
-    for field in included_fields:
-        if field == 'commit' and 'commit' in failure_details:
-            result['commit'] = failure_details['commit']
-        elif field == 'failed_jobs' and 'failed_jobs' in failure_details:
-            # Handle failure lines filtering based on include_lines parameter
-            if include_lines == 'none':
-                # Remove all failure lines
-                result['failed_jobs'] = [
-                    {k: v for k, v in job.items()
-                     if k not in ('failureLines', 'failureCaptures', 'failureLineNumbers')}
-                    for job in failure_details['failed_jobs']
-                ]
-            elif include_lines == 'summary':
-                # Include only the first failure line
-                result['failed_jobs'] = []
-                for job in failure_details['failed_jobs']:
-                    filtered_job = {k: v for k, v in job.items()
-                                  if k not in ('failureLines', 'failureCaptures', 'failureLineNumbers')}
-
-                    # Add just the first line of each failure type if available
-                    if 'failureLines' in job and job['failureLines']:
-                        filtered_job['failureLines'] = [job['failureLines'][0]]
-
-                    if 'failureCaptures' in job and job['failureCaptures']:
-                        filtered_job['failureCaptures'] = [job['failureCaptures'][0]]
-
-                    if 'failureLineNumbers' in job and job['failureLineNumbers']:
-                        filtered_job['failureLineNumbers'] = [job['failureLineNumbers'][0]]
-
-                    result['failed_jobs'].append(filtered_job)
-            else:
-                # Include all failure lines (default)
-                result['failed_jobs'] = failure_details['failed_jobs']
-        elif field == 'total_failures' and 'total_failures' in failure_details:
-            result['total_failures'] = failure_details['total_failures']
-        elif field == 'pagination' and 'pagination' in failure_details:
-            result['pagination'] = failure_details['pagination']
-
-    # Add size hints
-    if 'failed_jobs' in result:
-        include_mode = "all" if include_lines is None else include_lines
-        result['_size_hint'] = {
-            "failure_count": len(result.get("failed_jobs", [])),
-            "per_page": per_page,
-            "include_lines": include_mode,
-            "recommended_filters": "For large responses, use include_lines='summary' or include_lines='none'"
-        }
-    
-    # Add timestamp for debugging job count differences
-    result["_metadata"] = {
-        "timestamp": datetime.now().isoformat(),
-        "api_call": "get_failure_details_resource",
-        "parameter_signatures": {
-            "repo_owner": repo_owner,
-            "repo_name": repo_name,
-            "branch_or_commit_sha": branch_or_commit_sha,
-            "page": page,
-            "per_page": per_page
-        }
-    }
-
-    return safe_json_dumps(result, indent=2)
+# The get_failure_details_resource function has been replaced by the more flexible
+# get_recent_commits_with_jobs_resource function.
+# 
+# For equivalent functionality, use:
+# get_recent_commits_with_jobs_resource(
+#     repo_owner=repo_owner,
+#     repo_name=repo_name,
+#     branch_or_commit_sha=branch_or_commit_sha,
+#     include_failures=True,
+#     include_success=False,
+#     include_pending=False,
+#     page=page,
+#     per_page=per_page,
+#     # Optionally filter by specific failure lines
+#     # failure_line_filter_regex="pattern"
+# )
+# 
+# Note: The new function doesn't have an equivalent of the 'include_lines' parameter
+# for controlling the verbosity of failure lines. This feature may need to be added
+# to the universal function if needed.
 
 @mcp.tool()
 async def get_job_details_resource(job_id: int, ctx: Optional[Context] = None) -> str:
@@ -464,19 +302,21 @@ async def get_job_details_resource(job_id: int, ctx: Optional[Context] = None) -
     job_details = await get_job_details(job_id, ctx=ctx)
     return safe_json_dumps(job_details, indent=2)
 
-@mcp.tool()
-async def get_workflow_summary_resource(repo_owner: str, repo_name: str, branch_or_commit_sha: str, ctx: Optional[Context] = None) -> str:
-    """Get summary of workflow statuses.
-
-    Parameters:
-        repo_owner: Repository owner (e.g., 'pytorch')
-        repo_name: Repository name (e.g., 'pytorch')
-        branch_or_commit_sha: Branch name (e.g., 'main') or commit SHA
-            - When passing a branch name like 'main', returns data for the latest commit on that branch
-            - When passing a full commit SHA, returns data for that specific commit
-    """
-    workflow_summary = await get_workflow_summary(repo_owner, repo_name, branch_or_commit_sha, ctx=ctx)
-    return safe_json_dumps(workflow_summary, indent=2)
+# The get_workflow_summary_resource function has been replaced by the more flexible
+# get_recent_commits_with_jobs_resource function.
+# 
+# For equivalent workflow summary, use:
+# get_recent_commits_with_jobs_resource(
+#     repo_owner=repo_owner,
+#     repo_name=repo_name,
+#     branch_or_commit_sha=branch_or_commit_sha,
+#     include_success=True,
+#     include_failures=True,
+#     include_pending=True
+# )
+# 
+# Note: The workflow aggregation will need to be done client-side with the
+# data from the universal function.
 
 @mcp.tool()
 async def get_test_summary_resource(repo_owner: str, repo_name: str, branch_or_commit_sha: str, ctx: Optional[Context] = None) -> str:
@@ -1076,223 +916,111 @@ When analyzing extracted log sections:
 
 Remember: Focus on extracting and analyzing relevant portions of logs rather than attempting to process entire log files."""
 
-@mcp.tool()
-async def get_recent_commit_status(repo_owner: str, repo_name: str, branch_or_commit_sha: str = "main",
-                            count: int = 20, include_pending: bool = True, 
-                            ctx: Optional[Context] = None) -> Dict[str, Any]:
-    """Get status information for recent commits with detailed job status breakdown.
-
-    This function provides immediate trunk health status by examining recent commits
-    and their job status. Unlike the historical view from get_master_commit_red,
-    this focuses on current/recent builds with detailed job status breakdowns.
-
-    IMPORTANT: The HUD API response structure puts jobs from different commits in all
-    shaGrid entries. To get accurate failure counts, we'd need to check all entries in
-    the shaGrid array. Currently, we only look at the first entry which shows the most
-    recent data for the specific commit, but may miss some failures from earlier builds
-    of the same commit.
-
-    NOTE: This function determines job status based solely on the job's conclusion
-    field, not on the presence of failure lines.
-
-    Args:
-        repo_owner: Repository owner (e.g., 'pytorch')
-        repo_name: Repository name (e.g., 'pytorch')
-        branch_or_commit_sha: Branch name (e.g., 'main') or commit SHA
-            - When passing a branch name like 'main', returns recent commits on that branch
-            - When passing a full commit SHA, returns data starting from that specific commit
-        count: Number of recent commits to check (default: 20)
-        include_pending: Whether to include pending jobs in counts (default: True)
-        ctx: Optional MCP context for progress reporting
-
-    Returns:
-        Dictionary with detailed status for each recent commit, including:
-        - Commit metadata (sha, title, author, PR)
-        - Job counts by status (success, failure, pending, etc.)
-        - Overall commit status (red, green, or pending)
-        - Links to each commit's HUD page
-    """
-    if ctx:
-        await ctx.info(f"Fetching recent commit status for {repo_owner}/{repo_name} with branch_or_commit_sha={branch_or_commit_sha}")
-
-        # Report progress
-        if hasattr(ctx, 'report_progress') and callable(ctx.report_progress):
-            await ctx.report_progress(0, 2)
-
-    # Fetch a large number of recent commits with a single API call
-    # We'll use a higher per_page value to get multiple commits at once
-    hud_data = api.get_hud_data(repo_owner, repo_name, branch_or_commit_sha, per_page=count)
-
-    if ctx:
-        # Report progress
-        if hasattr(ctx, 'report_progress') and callable(ctx.report_progress):
-            await ctx.report_progress(1, 2)
-        
-        await ctx.info(f"Processing {len(hud_data.get('shaGrid', []))} commits from API response")
-        
-    # Add API call information for debugging
-    call_info = {
-        "timestamp": datetime.now().isoformat(),
-        "api_endpoint": "get_hud_data",
-        "parameters": {
-            "repo_owner": repo_owner,
-            "repo_name": repo_name,
-            "branch_or_commit_sha": branch_or_commit_sha,
-            "per_page": count
-        }
-    }
-
-    # Process the commits from the API response
-    commits = []
-    sha_grid = hud_data.get("shaGrid", [])
-
-    # Limit to the requested number of commits
-    sha_grid = sha_grid[:count]
-
-    # Process each commit in the shaGrid
-    for i, commit_entry in enumerate(sha_grid):
-        if ctx:
-            # Report progress
-            if hasattr(ctx, 'report_progress') and callable(ctx.report_progress):
-                await ctx.report_progress(i, len(sha_grid))
-            
-            await ctx.info(f"Processing commit {i+1}/{len(sha_grid)}: {commit_entry.get('sha', 'unknown')[:7]}")
-
-        # Default status values
-        total_jobs = 0
-        success_jobs = 0
-        failure_jobs = 0
-        pending_jobs = 0
-        skipped_jobs = 0
-
-        # Extract jobs for this commit
-        jobs = commit_entry.get("jobs", [])
-
-        for job in jobs:
-            # Skip empty job entries (sometimes returned in the API)
-            if not job:
-                continue
-
-            status = job.get("status", "unknown")
-            conclusion = job.get("conclusion", "unknown")
-
-            # Count jobs by status based only on the conclusion
-            if conclusion == "success":
-                success_jobs += 1
-            elif conclusion == "failure":
-                failure_jobs += 1
-            elif conclusion == "skipped":
-                skipped_jobs += 1
-            elif status == "queued" or status == "in_progress" or conclusion == "pending":
-                pending_jobs += 1
-
-        # Calculate total
-        total_jobs = success_jobs + failure_jobs + pending_jobs + skipped_jobs
-
-        # Determine overall status
-        overall_status = "unknown"
-        if failure_jobs > 0:
-            overall_status = "red"
-        elif pending_jobs > 0 and include_pending:
-            overall_status = "pending"
-        elif success_jobs > 0:
-            overall_status = "green"
-
-        # Extract commit metadata
-        commit_sha = commit_entry.get("sha", "")
-
-        # Create HUD URL for this commit
-        hud_url = f"https://hud.pytorch.org/{repo_owner}/{repo_name}/commit/{commit_sha}"
-
-        # Combine all information
-        commit_info = {
-            "sha": commit_sha,
-            "short_sha": commit_sha[:7] if commit_sha else "",
-            "title": commit_entry.get("commitTitle", ""),
-            "author": commit_entry.get("author", ""),
-            "time": commit_entry.get("time", ""),
-            "pr_num": commit_entry.get("prNum"),
-            "job_counts": {
-                "total": total_jobs,
-                "success": success_jobs,
-                "failure": failure_jobs,
-                "pending": pending_jobs,
-                "skipped": skipped_jobs
-            },
-            "status": overall_status,
-            "hud_url": hud_url
-        }
-
-        commits.append(commit_info)
-
-    if ctx:
-        await ctx.info(f"Finished processing {len(commits)} commits")
-
-    result = {
-        "repo": f"{repo_owner}/{repo_name}",
-        "branch": branch_or_commit_sha,
-        "commits": commits,
-        "summary": {
-            "total_commits": len(commits),
-            "red_commits": sum(1 for c in commits if c["status"] == "red"),
-            "green_commits": sum(1 for c in commits if c["status"] == "green"),
-            "pending_commits": sum(1 for c in commits if c["status"] == "pending")
-        }
-    }
-    
-    # Add API call information
-    result["_source"] = call_info
-    
-    return result
+# The get_recent_commit_status and get_recent_commit_status_resource functions
+# have been replaced by the more flexible get_recent_commits_with_jobs and
+# get_recent_commits_with_jobs_resource functions.
+# 
+# For equivalent functionality as the old get_recent_commit_status_resource, use:
+# get_recent_commits_with_jobs_resource(
+#     repo_owner=repo_owner, 
+#     repo_name=repo_name, 
+#     branch_or_commit_sha=branch_or_commit_sha,
+#     per_page=count
+# )
 
 @mcp.tool()
-async def get_recent_commit_status_resource(repo_owner: str, repo_name: str, branch_or_commit_sha: str = "main",
-                                      count: int = 20, include_pending: bool = True, ctx: Optional[Context] = None) -> str:
-    """Get status information for recent commits with detailed job status breakdown.
-
-    This function provides immediate trunk health status by examining recent commits
-    and their job status. Unlike the historical aggregation from get_master_commit_red,
-    this focuses on current/recent builds with their actual job status.
-
+async def get_recent_commits_with_jobs_resource(
+    repo_owner: str = "pytorch",
+    repo_name: str = "pytorch",
+    branch_or_commit_sha: str = "main",
+    include_success: bool = False,
+    include_pending: bool = False,
+    include_failures: bool = False,
+    include_commit_details: bool = True,
+    job_name_filter_regex: Optional[str] = None,
+    failure_line_filter_regex: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 10,
+    ctx: Optional[Context] = None
+) -> str:
+    """Universal function for getting recent commits with flexible filtering options.
+    
+    This consolidated endpoint replaces multiple specialized endpoints, providing
+    a single interface for retrieving commits and jobs with precise control over
+    what data is included to optimize context window usage.
+    
     Parameters:
         repo_owner: Repository owner (e.g., 'pytorch')
         repo_name: Repository name (e.g., 'pytorch')
         branch_or_commit_sha: Branch name (e.g., 'main') or commit SHA
-            - When passing a branch name like 'main', returns recent commits on that branch
-            - When passing a full commit SHA, returns data starting from that specific commit
-        count: Number of recent commits to check (default: 20)
-        include_pending: Whether to include pending jobs in counts (default: True)
-        ctx: Optional MCP context
-
-    Returns:
-        JSON with detailed status for recent commits, including:
-        - Commit metadata (sha, title, author)
-        - Job counts by status (success, failure, pending)
-        - Overall commit status (red, green, or pending)
         
-    Note:
-        This function determines job status based solely on the job's conclusion
-        field, not on the presence of failure lines.
+        # Job inclusion filters - control what job types to include
+        include_success: Include successful jobs (default: False)
+        include_pending: Include pending/in-progress jobs (default: False)
+        include_failures: Include failing jobs (default: False)
+        include_commit_details: Include PR number, diff URL, etc. (default: True)
+        
+        # Job content filters - control which jobs to include based on content
+        job_name_filter_regex: Only include jobs with names matching regex
+        failure_line_filter_regex: Only include jobs with failure lines matching regex
+        
+        # Pagination parameters
+        page: Page number (default: 1)
+        per_page: Number of commits per page (default: 10)
+        
+        ctx: Optional MCP context
+    
+    Returns:
+        JSON with flexible combination of commits and jobs based on filter settings
+        
+    Usage examples:
+    
+    1. Get basic commit info (default):
+       ```
+       get_recent_commits_with_jobs_resource()
+       ```
+       
+    2. Get failing GPU jobs:
+       ```
+       get_recent_commits_with_jobs_resource(include_failures=True, job_name_filter_regex="cuda|gpu")
+       ```
+       
+    3. Get OOM errors:
+       ```
+       get_recent_commits_with_jobs_resource(include_failures=True, failure_line_filter_regex="OOM")
+       ```
     """
-    # Use parameters directly - no conversion needed
-    # Get data
-    commit_status = await get_recent_commit_status(
-        repo_owner, repo_name, branch_or_commit_sha, count, include_pending, ctx=ctx
+    result = await get_recent_commits_with_jobs(
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        branch_or_commit_sha=branch_or_commit_sha,
+        include_success=include_success,
+        include_pending=include_pending,
+        include_failures=include_failures,
+        include_commit_details=include_commit_details,
+        job_name_filter_regex=job_name_filter_regex,
+        failure_line_filter_regex=failure_line_filter_regex,
+        page=page,
+        per_page=per_page,
+        ctx=ctx
     )
     
-    # Add timestamp for debugging job count differences
-    commit_status["_metadata"] = {
-        "timestamp": datetime.now().isoformat(),
-        "api_call": "get_recent_commit_status_resource",
+    # Add timestamp and request metadata
+    result["_metadata"].update({
+        "api_call": "get_recent_commits_with_jobs_resource",
         "parameter_signatures": {
             "repo_owner": repo_owner,
             "repo_name": repo_name,
             "branch_or_commit_sha": branch_or_commit_sha,
-            "count": count
+            "include_success": include_success,
+            "include_pending": include_pending,
+            "include_failures": include_failures,
+            "page": page,
+            "per_page": per_page
         }
-    }
-
-    return safe_json_dumps(commit_status, indent=2)
+    })
+    
+    return safe_json_dumps(result, indent=2)
 
 # Run the server if executed directly
 if __name__ == "__main__":

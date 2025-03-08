@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for validating the get_recent_commit_status function on real data.
+Test script for validating the get_recent_commits_with_jobs function on real data.
 
 This tests the actual PyTorch HUD API response to verify that our function 
 correctly processes real data and returns unique commits.
@@ -11,21 +11,25 @@ import json
 from datetime import datetime
 
 # Import the function directly for testing
-from pytorch_hud.server.mcp_server import get_recent_commit_status
+from pytorch_hud.tools.hud_data import get_recent_commits_with_jobs
 
 async def run_test():
-    """Test the get_recent_commit_status function on real data."""
+    """Test the get_recent_commits_with_jobs function on real data."""
     print(f"Starting test at {datetime.now().isoformat()}")
     
     # Set the number of commits to fetch
-    count = 5
+    per_page = 5
     
-    print(f"Fetching {count} recent commits from PyTorch HUD API...")
-    result = await get_recent_commit_status(
+    print(f"Fetching {per_page} recent commits from PyTorch HUD API...")
+    result = await get_recent_commits_with_jobs(
         repo_owner="pytorch", 
         repo_name="pytorch", 
-        branch="main", 
-        count=count
+        branch_or_commit_sha="main",
+        per_page=per_page,
+        # Don't include job details to minimize response size
+        include_success=False,
+        include_pending=False,
+        include_failures=False
     )
     
     # Print basic information about the results
@@ -37,7 +41,7 @@ async def run_test():
         print(f"  Title: {commit['title']}")
         print(f"  Author: {commit['author']}")
         print(f"  Time: {commit['time']}")
-        print(f"  PR: {commit['pr_num']}")
+        print(f"  PR: {commit.get('prNum')}")  # May use different field name
         print(f"  Status: {commit['status']}")
         print("  Job counts:")
         for status, count in commit['job_counts'].items():
@@ -60,9 +64,9 @@ async def run_test():
         for sha, count in duplicates.items():
             print(f"  SHA {sha} appears {count} times")
     
-    # Check summary statistics
-    print("\nSummary statistics:")
-    for key, value in result['summary'].items():
+    # Check pagination info
+    print("\nPagination information:")
+    for key, value in result['pagination'].items():
         print(f"  {key}: {value}")
     
     # Save the result to a file for further examination

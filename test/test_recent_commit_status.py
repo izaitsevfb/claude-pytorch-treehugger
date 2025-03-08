@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Test script for validating the get_recent_commit_status function in the PyTorch HUD MCP server.
+Test script for validating the get_recent_commits_with_jobs function in the PyTorch HUD MCP server.
 
-This test verifies that the function correctly counts jobs by status and identifies
+This test verifies that the universal function correctly counts jobs by status and identifies
 red, green, and pending commits.
 """
 
 import unittest
 from unittest.mock import patch
 
-from pytorch_hud.server.mcp_server import get_recent_commit_status
+from pytorch_hud.tools.hud_data import get_recent_commits_with_jobs
 
 # Sample HUD response with various job statuses for testing
 SAMPLE_HUD_DATA = {
@@ -29,7 +29,8 @@ SAMPLE_HUD_DATA = {
                 {"id": "job6", "status": "completed", "conclusion": "success"}
             ]
         }
-    ]
+    ],
+    "jobNames": ["job1", "job2", "job3", "job4", "job5", "job6"]
 }
 
 # Sample commit response for testing
@@ -42,14 +43,13 @@ SAMPLE_COMMIT_DATA = {
 }
 
 class TestRecentCommitStatus(unittest.IsolatedAsyncioTestCase):
-    """Tests for the get_recent_commit_status function."""
+    """Tests for the get_recent_commits_with_jobs function."""
 
     async def test_job_status_counting(self):
         """Test that jobs are correctly counted by status."""
         # Setup mocks
-        with patch('pytorch_hud.server.mcp_server.api.get_hud_data') as mock_get_hud_data:
+        with patch('pytorch_hud.tools.hud_data.api.get_hud_data') as mock_get_hud_data:
             # Now we directly use the shaGrid data from the HUD response
-            # without calling get_commit_summary
             mock_get_hud_data.return_value = {
                 "shaGrid": [
                     {
@@ -60,11 +60,18 @@ class TestRecentCommitStatus(unittest.IsolatedAsyncioTestCase):
                         "prNum": SAMPLE_COMMIT_DATA["prNum"],
                         "jobs": SAMPLE_HUD_DATA["shaGrid"][0]["jobs"]
                     }
-                ]
+                ],
+                "jobNames": SAMPLE_HUD_DATA["jobNames"]
             }
             
-            # Call the function
-            result = await get_recent_commit_status("pytorch", "pytorch", count=1)
+            # Call the universal function without requesting job details
+            result = await get_recent_commits_with_jobs(
+                "pytorch", "pytorch", 
+                per_page=1,
+                include_success=False,
+                include_failures=False,
+                include_pending=False
+            )
             
             # Verify the result
             self.assertEqual(len(result["commits"]), 1)
@@ -120,7 +127,7 @@ class TestRecentCommitStatus(unittest.IsolatedAsyncioTestCase):
             }
         ]
         
-        with patch('pytorch_hud.server.mcp_server.api.get_hud_data') as mock_get_hud_data:
+        with patch('pytorch_hud.tools.hud_data.api.get_hud_data') as mock_get_hud_data:
                 
             for i, test_case in enumerate(test_cases):
                 # Setup mocks for this test case
@@ -134,12 +141,19 @@ class TestRecentCommitStatus(unittest.IsolatedAsyncioTestCase):
                             "prNum": 12345,
                             "jobs": test_case["jobs"]
                         }
-                    ]
+                    ],
+                    "jobNames": ["job1", "job2", "job3"][:len(test_case["jobs"])]
                 }
                 mock_get_hud_data.return_value = hud_data
                 
-                # Call the function
-                result = await get_recent_commit_status("pytorch", "pytorch", count=1)
+                # Call the universal function
+                result = await get_recent_commits_with_jobs(
+                    "pytorch", "pytorch", 
+                    per_page=1,
+                    include_success=False, 
+                    include_failures=False,
+                    include_pending=False
+                )
                 
                 # Verify the result
                 self.assertEqual(len(result["commits"]), 1)
@@ -154,7 +168,7 @@ class TestRecentCommitStatus(unittest.IsolatedAsyncioTestCase):
 
     async def test_multiple_commits(self):
         """Test that multiple commits are handled correctly."""
-        with patch('pytorch_hud.server.mcp_server.api.get_hud_data') as mock_get_hud_data:
+        with patch('pytorch_hud.tools.hud_data.api.get_hud_data') as mock_get_hud_data:
             # Create multiple commits in a single response
             hud_data = {
                 "shaGrid": [
@@ -191,12 +205,19 @@ class TestRecentCommitStatus(unittest.IsolatedAsyncioTestCase):
                             {"id": "job6", "status": "queued", "conclusion": None}
                         ]
                     }
-                ]
+                ],
+                "jobNames": ["job1", "job2", "job3", "job4", "job5", "job6"]
             }
             mock_get_hud_data.return_value = hud_data
             
-            # Call the function with count=3
-            result = await get_recent_commit_status("pytorch", "pytorch", count=3)
+            # Call the function with per_page=3
+            result = await get_recent_commits_with_jobs(
+                "pytorch", "pytorch", 
+                per_page=3,
+                include_success=False,
+                include_failures=False,
+                include_pending=False
+            )
             
             # Verify the result
             self.assertEqual(len(result["commits"]), 3)
@@ -206,11 +227,79 @@ class TestRecentCommitStatus(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["commits"][1]["status"], "red")
             self.assertEqual(result["commits"][2]["status"], "pending")
             
-            # Check summary counts
-            self.assertEqual(result["summary"]["total_commits"], 3)
-            self.assertEqual(result["summary"]["red_commits"], 1)
-            self.assertEqual(result["summary"]["green_commits"], 1)
-            self.assertEqual(result["summary"]["pending_commits"], 1)
+            # Check pagination info
+            self.assertEqual(result["pagination"]["returned_commits"], 3)
+            self.assertEqual(result["pagination"]["per_page"], 3)
+
+    async def test_job_filtering(self):
+        """Test that job filtering by status works correctly."""
+        with patch('pytorch_hud.tools.hud_data.api.get_hud_data') as mock_get_hud_data:
+            mock_get_hud_data.return_value = {
+                "shaGrid": [
+                    {
+                        "sha": SAMPLE_COMMIT_DATA["sha"],
+                        "commitTitle": SAMPLE_COMMIT_DATA["commitTitle"],
+                        "author": SAMPLE_COMMIT_DATA["author"],
+                        "time": SAMPLE_COMMIT_DATA["time"],
+                        "prNum": SAMPLE_COMMIT_DATA["prNum"],
+                        "jobs": SAMPLE_HUD_DATA["shaGrid"][0]["jobs"]
+                    }
+                ],
+                "jobNames": ["job1", "job2", "job3", "job4", "job5", "job6"]
+            }
+            
+            # Test including only success jobs
+            result = await get_recent_commits_with_jobs(
+                "pytorch", "pytorch",
+                per_page=1,
+                include_success=True,
+                include_failures=False,
+                include_pending=False
+            )
+            
+            # Check that only success jobs are included
+            self.assertEqual(len(result["commits"]), 1)
+            commit = result["commits"][0]
+            self.assertIn("jobs", commit)
+            
+            # There should be 2 success jobs
+            success_jobs = [job for job in commit["jobs"] if job.get("conclusion") == "success"]
+            self.assertEqual(len(success_jobs), 2)
+            
+            # Reset the mock
+            mock_get_hud_data.reset_mock()
+            
+            # Test including only failure jobs
+            mock_get_hud_data.return_value = {
+                "shaGrid": [
+                    {
+                        "sha": SAMPLE_COMMIT_DATA["sha"],
+                        "commitTitle": SAMPLE_COMMIT_DATA["commitTitle"],
+                        "author": SAMPLE_COMMIT_DATA["author"],
+                        "time": SAMPLE_COMMIT_DATA["time"],
+                        "prNum": SAMPLE_COMMIT_DATA["prNum"],
+                        "jobs": SAMPLE_HUD_DATA["shaGrid"][0]["jobs"]
+                    }
+                ],
+                "jobNames": ["job1", "job2", "job3", "job4", "job5", "job6"]
+            }
+            
+            result = await get_recent_commits_with_jobs(
+                "pytorch", "pytorch",
+                per_page=1,
+                include_success=False,
+                include_failures=True,
+                include_pending=False
+            )
+            
+            # Check that only failure jobs are included
+            self.assertEqual(len(result["commits"]), 1)
+            commit = result["commits"][0]
+            self.assertIn("jobs", commit)
+            
+            # There should be 1 failure job
+            failure_jobs = [job for job in commit["jobs"] if job.get("conclusion") == "failure"]
+            self.assertEqual(len(failure_jobs), 1)
 
 if __name__ == "__main__":
     import asyncio
