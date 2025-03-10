@@ -13,8 +13,7 @@ from unittest.mock import patch
 
 # Import the resource endpoints from MCP server
 from pytorch_hud.server.mcp_server import (
-    get_hud_data_resource, get_commit_summary_resource, get_job_summary_resource,
-    get_job_details_resource, get_test_summary_resource, get_recent_commits_with_jobs_resource
+    get_job_details_resource, get_recent_commits_with_jobs_resource
 )
 
 class TestAsyncMCPEndpoints(unittest.IsolatedAsyncioTestCase):
@@ -199,140 +198,10 @@ class TestAsyncMCPEndpoints(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result_data["job_id"], "job123")
         self.assertIn("log_url", result_data)
 
-    @patch('pytorch_hud.server.mcp_server.get_commit_summary')
-    async def test_commit_summary_resource(self, mock_get_commit_summary):
-        """Test that the commit_summary_resource properly awaits the async function."""
-        # Create mock return value
-        mock_result = {
-            "sha": "abcdef",
-            "commitTitle": "Test Commit",
-            "author": "test-user",
-            "time": "2025-03-06T15:00:00Z",
-            "prNum": 12345
-        }
-        
-        # Set up mock to return our sample data
-        mock_get_commit_summary.return_value = mock_result
-        
-        # Call the resource endpoint
-        result = await get_commit_summary_resource("pytorch", "pytorch", "main")
-        
-        # Verify the resource endpoint was called with the correct arguments
-        mock_get_commit_summary.assert_called_once_with("pytorch", "pytorch", "main", ctx=None)
-        
-        # Result should be a JSON string - parse it back to verify contents
-        result_data = json.loads(result)
-        
-        # Check that it contains the expected fields
-        self.assertEqual(result_data["sha"], "abcdef")
-        self.assertIn("commitTitle", result_data)
+    # Removed test_commit_summary_resource, test_job_summary_resource, test_test_summary_resource
+    # as these functions have been consolidated into get_recent_commits_with_jobs
 
-    @patch('pytorch_hud.server.mcp_server.get_job_summary')
-    async def test_job_summary_resource(self, mock_get_job_summary):
-        """Test that the job_summary_resource properly awaits the async function."""
-        # Create mock return value
-        mock_result = {
-            "commit": {"sha": "abcdef", "title": "Test Commit", "author": "test-user"},
-            "status_counts": {
-                "success": 10,
-                "failure": 2,
-                "pending": 1,
-                "total": 13
-            },
-            "workflow_counts": {
-                "workflow1": 5,
-                "workflow2": 8
-            }
-        }
-        
-        # Set up mock to return our sample data
-        mock_get_job_summary.return_value = mock_result
-        
-        # Call the resource endpoint
-        result = await get_job_summary_resource("pytorch", "pytorch", "main")
-        
-        # Verify the resource endpoint was called with the correct arguments
-        mock_get_job_summary.assert_called_once_with("pytorch", "pytorch", "main", ctx=None)
-        
-        # Result should be a JSON string - parse it back to verify contents
-        result_data = json.loads(result)
-        
-        # Check that it contains the expected fields
-        self.assertIn("status_counts", result_data)
-        self.assertEqual(result_data["status_counts"]["total"], 13)
-
-    @patch('pytorch_hud.server.mcp_server.get_test_summary')
-    async def test_test_summary_resource(self, mock_get_test_summary):
-        """Test that the test_summary_resource properly awaits the async function."""
-        # Create mock return value
-        mock_result = {
-            "commit": {"sha": "abcdef", "title": "Test Commit", "author": "test-user"},
-            "failed_tests": [
-                {
-                    "test_name": "test_function1",
-                    "job_id": "job1",
-                    "job_url": "https://example.com/job1",
-                    "error_line": "FAIL: test_function1"
-                },
-                {
-                    "test_name": "test_function2",
-                    "job_id": "job2",
-                    "job_url": "https://example.com/job2",
-                    "error_line": "FAIL: test_function2"
-                }
-            ],
-            "test_jobs": 10,
-            "total_failed_tests": 2
-        }
-        
-        # Set up mock to return our sample data
-        mock_get_test_summary.return_value = mock_result
-        
-        # Call the resource endpoint
-        result = await get_test_summary_resource("pytorch", "pytorch", "main")
-        
-        # Verify the resource endpoint was called with the correct arguments
-        mock_get_test_summary.assert_called_once_with("pytorch", "pytorch", "main", ctx=None)
-        
-        # Result should be a JSON string - parse it back to verify contents
-        result_data = json.loads(result)
-        
-        # Check that it contains the expected fields
-        self.assertIn("failed_tests", result_data)
-        self.assertEqual(result_data["total_failed_tests"], 2)
-
-    @patch('pytorch_hud.server.mcp_server.api.get_hud_data')
-    async def test_hud_data_resource(self, mock_get_hud_data):
-        """Test that the hud_data_resource properly awaits the async function."""
-        # Create a simplified mock return value
-        mock_result = {
-            "shaGrid": [
-                {
-                    "sha": "abcdef",
-                    "commitTitle": "Test Commit",
-                    "author": "test-user",
-                    "jobs": [{"id": "job1"}, {"id": "job2"}]
-                }
-            ],
-            "jobNames": ["job1", "job2"]
-        }
-        
-        # Set up mock to return our sample data
-        mock_get_hud_data.return_value = mock_result
-        
-        # Call the resource endpoint - note that hud_data_resource is synchronous
-        # but should internally call the async get_hud_data
-        result = get_hud_data_resource(
-            "pytorch", "pytorch", "main",
-            per_page=3, merge_lf=True, page=1
-        )
-        
-        # Result should be a JSON string - parse it back to verify contents
-        result_data = json.loads(result)
-        
-        # Check that it contains the expected fields
-        self.assertIn("shaGrid", result_data)
-        self.assertEqual(len(result_data["shaGrid"]), 1)
+    # Removed test_hud_data_resource as get_hud_data has been removed
 
 if __name__ == "__main__":
     unittest.main()

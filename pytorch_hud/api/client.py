@@ -4,7 +4,6 @@ PyTorch HUD API client implementation
 
 import json
 import requests
-import urllib.parse
 import logging
 import time
 from typing import Dict, Any, List, Optional
@@ -173,9 +172,6 @@ class PyTorchHudAPI:
             "master_commit_red",
             "queued_jobs",
             "disabled_test_historical",
-            "unique_repos_in_runnercost",
-            "job_duration_avg",
-            "workflow_duration_avg",
             "master_commit_red_percent",
             "master_commit_red_jobs",
             "nightly_jobs_red",
@@ -186,9 +182,7 @@ class PyTorchHudAPI:
             "disabled_tests",
             "tts_avg",
             "tts_percentile",
-            "ttrs_percentiles",
-            "queue_times_historical",
-            "queue_times_historical_pct"
+            "ttrs_percentiles"
         ]
 
         self._clickhouse_queries_cache = hardcoded_queries
@@ -224,11 +218,6 @@ class PyTorchHudAPI:
                 "stopTime": now.isoformat(),
                 "timezone": "America/Los_Angeles"
             }
-
-    def get_issue_data(self, issue_name: str) -> Dict[str, Any]:
-        """Get data for a specific issue."""
-        endpoint = f"issue/{urllib.parse.quote(issue_name)}"
-        return self._make_request(endpoint)
 
     def get_job_annotation(self, repo_owner: str, repo_name: str, annotation_type: str,
                           parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -277,21 +266,6 @@ class PyTorchHudAPI:
         """
         return f"https://ossci-raw-job-status.s3.amazonaws.com/log/{job_id}"
 
-    def get_utilization_metadata(self, job_id: str) -> Dict[str, Any]:
-        """Get utilization metadata for a job."""
-        endpoint = f"list_utilization_metadata_info/{job_id}"
-        return self._make_request(endpoint)
-
-    def get_commit_data(self, repo_owner: str, repo_name: str, commit_sha: str) -> Dict[str, Any]:
-        """Get data for a specific commit."""
-        endpoint = f"{repo_owner}/{repo_name}/commit/{commit_sha}"
-        return self._make_request(endpoint)
-
-    def get_recent_workflows(self, repo_owner: str, repo_name: str, count: int = 100) -> Dict[str, Any]:
-        """Get recent workflows for a repository."""
-        endpoint = f"recent_workflows/{repo_owner}/{repo_name}"
-        params = {"count": count}
-        return self._make_request(endpoint, params)
 
     def search_logs(self, query: str, repo: Optional[str] = None, workflow: Optional[str] = None) -> Dict[str, Any]:
         """Search job logs.
@@ -333,3 +307,4 @@ class PyTorchHudAPI:
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to download log for job {job_id}: {e}")
             raise PyTorchHudAPIError(f"Failed to download log for job {job_id}: {e}") from e
+

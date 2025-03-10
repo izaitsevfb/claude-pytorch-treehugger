@@ -11,15 +11,15 @@ import unittest
 import requests
 from unittest.mock import patch
 
-from pytorch_hud.tools.hud_data import get_failure_details
+from pytorch_hud.tools.hud_data import get_recent_commits_with_jobs
 from pytorch_hud.server.mcp_server import get_recent_commits_with_jobs_resource
 
 class TestFailureDetails(unittest.IsolatedAsyncioTestCase):
-    """Tests for the get_failure_details function."""
+    """Tests for failure detection in get_recent_commits_with_jobs function."""
 
     @patch('pytorch_hud.tools.hud_data.api.get_hud_data')
     async def test_hidden_failures_detected(self, mock_get_hud_data):
-        """Test that hidden failures (successful conclusion but failure lines) are correctly detected."""
+        """Test that failures are correctly detected."""
         # Create sample with hidden failures
         hidden_failure_sample = {
             "shaGrid": [
@@ -52,33 +52,35 @@ class TestFailureDetails(unittest.IsolatedAsyncioTestCase):
                         {"id": "job4", "status": "in_progress", "conclusion": None}
                     ]
                 }
-            ]
+            ],
+            "jobNames": ["job1", "job2", "job3", "job4"]
         }
         
         # Setup mock
         mock_get_hud_data.return_value = hidden_failure_sample
         
-        # Call function
-        result = await get_failure_details("pytorch", "pytorch", "main")
+        # Call function with failures filter
+        result = await get_recent_commits_with_jobs(
+            repo_owner="pytorch", 
+            repo_name="pytorch", 
+            branch_or_commit_sha="main",
+            include_failures=True
+        )
         
-        # Verify job counts - updated to reflect new behavior of only counting explicit failures
-        self.assertEqual(result["job_status_counts"]["total"], 4, "Should count all jobs")
-        self.assertEqual(result["job_status_counts"]["success"], 2, "Should count 2 success jobs (including one with failure lines)")
-        self.assertEqual(result["job_status_counts"]["failure"], 1, "Should count 1 explicit failure")
-        self.assertEqual(result["job_status_counts"]["in_progress"], 1, "Should count 1 in-progress job")
+        # Verify commit info
+        self.assertEqual(len(result["commits"]), 1)
+        commit = result["commits"][0]
         
-        # Verify failures list - now only including explicit failures
-        self.assertEqual(result["total_failures"], 1, "Should list 1 failure")
-        self.assertEqual(len(result["failed_jobs"]), 1, "Should include 1 failed job")
+        # Verify job counts
+        self.assertEqual(commit["job_counts"]["total"], 4)
+        self.assertEqual(commit["job_counts"]["success"], 2)
+        self.assertEqual(commit["job_counts"]["failure"], 1)
+        self.assertEqual(commit["job_counts"]["pending"], 1)
         
-        # Verify only the explicit failure is in the list
-        failure_ids = [job.get("id") for job in result["failed_jobs"]]
-        self.assertNotIn("job2", failure_ids, "Job with success conclusion but failure lines should NOT be in failed_jobs list")
-        self.assertIn("job3", failure_ids, "Explicit failure should be in failed_jobs list")
-        
-
-        # Build status should be "failing" due to failures
-        self.assertEqual(result["build_status"], "failing")
+        # Check that the jobs array contains only the failure job (since we used include_failures=True)
+        self.assertEqual(len(commit.get("jobs", [])), 1)
+        self.assertEqual(commit["jobs"][0]["id"], "job3")
+        self.assertEqual(commit["status"], "red")
 
     @patch('pytorch_hud.tools.hud_data.api.get_hud_data')
     async def test_all_success_jobs(self, mock_get_hud_data):
@@ -98,26 +100,33 @@ class TestFailureDetails(unittest.IsolatedAsyncioTestCase):
                         {"id": "job3", "status": "completed", "conclusion": "success"}
                     ]
                 }
-            ]
+            ],
+            "jobNames": ["job1", "job2", "job3"]
         }
         
         # Setup mock
         mock_get_hud_data.return_value = success_sample
         
         # Call function
-        result = await get_failure_details("pytorch", "pytorch", "main")
+        result = await get_recent_commits_with_jobs(
+            repo_owner="pytorch", 
+            repo_name="pytorch", 
+            branch_or_commit_sha="main",
+            include_success=True
+        )
+        
+        # Verify commit info
+        self.assertEqual(len(result["commits"]), 1)
+        commit = result["commits"][0]
         
         # Verify job counts
-        self.assertEqual(result["job_status_counts"]["total"], 3, "Should count all jobs")
-        self.assertEqual(result["job_status_counts"]["success"], 3, "Should count 3 success jobs")
-        self.assertEqual(result["job_status_counts"]["failure"], 0, "Should count 0 failures")
+        self.assertEqual(commit["job_counts"]["total"], 3)
+        self.assertEqual(commit["job_counts"]["success"], 3)
+        self.assertEqual(commit["job_counts"]["failure"], 0)
         
-        # Verify failures list
-        self.assertEqual(result["total_failures"], 0, "Should list 0 failures")
-        self.assertEqual(len(result["failed_jobs"]), 0, "Should include 0 failed jobs")
-                
-        # Build status should be "passing" due to no failures
-        self.assertEqual(result["build_status"], "passing")
+        # Since we used include_success=True, all successful jobs should be included
+        self.assertEqual(len(commit.get("jobs", [])), 3)
+        self.assertEqual(commit["status"], "green")
 
     @patch('pytorch_hud.server.mcp_server.get_recent_commits_with_jobs')
     async def test_failure_details_resource(self, mock_get_recent_commits):

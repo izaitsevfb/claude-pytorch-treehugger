@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 from pytorch_hud import PyTorchHudAPI
 from pytorch_hud.log_analysis.tools import extract_log_patterns, extract_test_results, filter_log_sections, search_logs
-from pytorch_hud.log_analysis.tools import get_artifacts, get_s3_log_url, get_utilization_metadata
+from pytorch_hud.log_analysis.tools import get_artifacts, get_s3_log_url
 
 class LogAnalysisTest(unittest.IsolatedAsyncioTestCase):
     """Test suite for log analysis tools"""
@@ -57,26 +57,22 @@ test_nn.py::TestNN::test_linear ... skipped (not implemented)
             # Set up return values
             mock_api.get_artifacts.return_value = {"artifacts": []}
             mock_api.get_s3_log_url.return_value = "https://example.com/logs/123456"
-            mock_api.get_utilization_metadata.return_value = {"metadata": []}
             mock_api.search_logs.return_value = {"results": []}
             
             # Test the wrapper functions
             job_id = "123456"
             artifacts = get_artifacts("s3", job_id)
             log_url = get_s3_log_url(job_id)
-            metadata = get_utilization_metadata(job_id)
             search_result = search_logs("error", repo="pytorch/pytorch")
             
             # Verify correct API methods were called
             mock_api.get_artifacts.assert_called_once_with("s3", job_id)
             mock_api.get_s3_log_url.assert_called_once_with(job_id)
-            mock_api.get_utilization_metadata.assert_called_once_with(job_id)
             mock_api.search_logs.assert_called_once_with("error", repo="pytorch/pytorch", workflow=None)
             
             # Verify returned values
             self.assertEqual(artifacts, {"artifacts": []})
             self.assertEqual(log_url, "https://example.com/logs/123456")
-            self.assertEqual(metadata, {"metadata": []})
             self.assertEqual(search_result, {"results": []})
     
     def test_download_log(self):

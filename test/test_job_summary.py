@@ -6,7 +6,7 @@ import sys
 # Add the parent directory to the path so we can import the modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pytorch_hud.tools.hud_data import get_job_summary, get_workflow_summary, get_test_summary
+from pytorch_hud.tools.hud_data import get_recent_commits_with_jobs
 
 
 class TestJobSummary(unittest.IsolatedAsyncioTestCase):
@@ -44,7 +44,8 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
                         }
                     ]
                 }
-            ]
+            ],
+            "jobNames": ["job1", "job2", "job3"]
         }
         
         # Mock the API response
@@ -54,21 +55,28 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
         mock_ctx = MagicMock()
         mock_ctx.info = AsyncMock()
         
-        # Call the function with mock context
-        result = await get_job_summary("pytorch", "pytorch", "main", ctx=mock_ctx)
+        # Call the function with mock context to get commit status info
+        result = await get_recent_commits_with_jobs(
+            "pytorch", "pytorch", "main", 
+            ctx=mock_ctx
+        )
         
-        # Verify the results - updated for new behavior
-        self.assertEqual(result["status_counts"]["total"], 3)
-        self.assertEqual(result["status_counts"]["success"], 2)  # Both jobs with success conclusion
-        self.assertEqual(result["status_counts"]["failure"], 1)  # Only explicit failures counted
+        # Verify the commit and job counts
+        self.assertEqual(len(result["commits"]), 1)
+        commit = result["commits"][0]
+        
+        # Check job counts
+        self.assertEqual(commit["job_counts"]["total"], 3)
+        self.assertEqual(commit["job_counts"]["success"], 2)  # Both jobs with success conclusion
+        self.assertEqual(commit["job_counts"]["failure"], 1)  # Only explicit failures counted
         
         # Make sure the API was called correctly
-        mock_api.get_hud_data.assert_called_once_with("pytorch", "pytorch", "main", per_page=1)
+        mock_api.get_hud_data.assert_called_once()
 
     @patch('pytorch_hud.tools.hud_data.api')
-    async def test_workflow_summary_hidden_failures(self, mock_api):
-        """Test that workflow summary correctly identifies hidden failures."""
-        # Create a test case with hidden failures in workflow jobs
+    async def test_workflow_filtering(self, mock_api):
+        """Test that workflow-related job filtering works correctly."""
+        # Create a test case with workflow information in URLs
         test_data = {
             "shaGrid": [
                 {
@@ -80,6 +88,7 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
                             "id": "job1",
                             "conclusion": "success",
                             "status": "completed",
+                            "name": "workflow1_job1",
                             "htmlUrl": "https://github.com/pytorch/pytorch/actions/runs/123/workflow1/job/456",
                             "durationS": 60,
                             "failureLines": []  # No failure lines = real success
@@ -88,6 +97,7 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
                             "id": "job2",
                             "conclusion": "success", 
                             "status": "completed",
+                            "name": "workflow1_job2",
                             "htmlUrl": "https://github.com/pytorch/pytorch/actions/runs/123/workflow1/job/789",
                             "durationS": 90,
                             "failureLines": ["Error in test"]  # Has failure lines = hidden failure
@@ -96,13 +106,15 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
                             "id": "job3",
                             "conclusion": "failure",
                             "status": "completed",
+                            "name": "workflow2_job1",
                             "htmlUrl": "https://github.com/pytorch/pytorch/actions/runs/123/workflow2/job/101",
                             "durationS": 120,
                             "failureLines": ["Explicit failure"]  # Explicit failure
                         }
                     ]
                 }
-            ]
+            ],
+            "jobNames": ["workflow1_job1", "workflow1_job2", "workflow2_job1"]
         }
         
         # Mock the API response
@@ -112,38 +124,36 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
         mock_ctx = MagicMock()
         mock_ctx.info = AsyncMock()
         
-        # Call the function with mock context
-        result = await get_workflow_summary("pytorch", "pytorch", "main", ctx=mock_ctx)
+        # Call the function with job name regex to filter by workflow1
+        result = await get_recent_commits_with_jobs(
+            "pytorch", "pytorch", "main",
+            include_success=True,
+            include_failures=True,
+            job_name_filter_regex="workflow1",
+            ctx=mock_ctx
+        )
         
         # Verify the results
-        # We should have 2 workflows
-        self.assertEqual(len(result["workflows"]), 2)
+        self.assertEqual(len(result["commits"]), 1)
+        commit = result["commits"][0]
         
-        # Find workflow1 which should have 1 success and 1 hidden failure
-        workflow1 = None
-        workflow2 = None
-        for wf in result["workflows"]:
-            if wf["name"] == "workflow1":
-                workflow1 = wf
-            elif wf["name"] == "workflow2":
-                workflow2 = wf
+        # Check job counts for all jobs
+        self.assertEqual(commit["job_counts"]["total"], 3)
+        self.assertEqual(commit["job_counts"]["success"], 2)
+        self.assertEqual(commit["job_counts"]["failure"], 1)
         
-        # Verify workflow1 has correct counts - updated for new behavior
-        self.assertIsNotNone(workflow1)
-        self.assertEqual(workflow1["total_jobs"], 2)
-        self.assertEqual(workflow1["success"], 2)  # Both jobs with success conclusion
-        self.assertEqual(workflow1["failure"], 0)  # No explicit failures
+        # Check that only workflow1 jobs are included in the jobs array
+        self.assertEqual(len(commit["jobs"]), 2)
         
-        # Verify workflow2 has correct counts
-        self.assertIsNotNone(workflow2)
-        self.assertEqual(workflow2["total_jobs"], 1)
-        self.assertEqual(workflow2["success"], 0)
-        self.assertEqual(workflow2["failure"], 1)  # 1 explicit failure
+        job_names = [job.get("name") for job in commit["jobs"]]
+        self.assertIn("workflow1_job1", job_names)
+        self.assertIn("workflow1_job2", job_names)
+        self.assertNotIn("workflow2_job1", job_names)
     
     @patch('pytorch_hud.tools.hud_data.api')
-    async def test_test_summary_hidden_failures(self, mock_api):
-        """Test that test summary correctly identifies hidden failures."""
-        # Create a test case with hidden failures in test jobs
+    async def test_test_failure_line_filtering(self, mock_api):
+        """Test that filtering by test failure patterns works correctly."""
+        # Create a test case with various failure patterns
         test_data = {
             "shaGrid": [
                 {
@@ -153,6 +163,7 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
                     "jobs": [
                         {
                             "id": "job1",
+                            "name": "test_job1",
                             "conclusion": "success",
                             "status": "completed",
                             "htmlUrl": "https://github.com/pytorch/pytorch/actions/runs/123/test_workflow/job/456",
@@ -160,28 +171,32 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
                         },
                         {
                             "id": "job2",
-                            "conclusion": "success",
+                            "name": "test_job2",
+                            "conclusion": "failure",
                             "status": "completed",
                             "htmlUrl": "https://github.com/pytorch/pytorch/actions/runs/123/test_workflow/job/789",
-                            "failureLines": ["FAIL: test_function"]  # Has failure lines = hidden failure
+                            "failureLines": ["FAIL: test_function"]  # Test failure
                         },
                         {
                             "id": "job3",
+                            "name": "test_job3",
                             "conclusion": "failure",
                             "status": "completed",
                             "htmlUrl": "https://github.com/pytorch/pytorch/actions/runs/123/test_workflow/job/101",
-                            "failureLines": ["ERROR: test_another_function"]  # Explicit failure
+                            "failureLines": ["ERROR: test_another_function"]  # Another test failure
                         },
                         {
                             "id": "job4",
-                            "conclusion": "success",
+                            "name": "build_job",
+                            "conclusion": "failure",
                             "status": "completed",
                             "htmlUrl": "https://github.com/pytorch/pytorch/actions/runs/123/build_workflow/job/102",
-                            "failureLines": ["Some error but not a test job"]  # Not a test job
+                            "failureLines": ["Some error but not a test-related error"]  # Build failure
                         }
                     ]
                 }
-            ]
+            ],
+            "jobNames": ["test_job1", "test_job2", "test_job3", "build_job"]
         }
         
         # Mock the API response
@@ -191,12 +206,28 @@ class TestJobSummary(unittest.IsolatedAsyncioTestCase):
         mock_ctx = MagicMock()
         mock_ctx.info = AsyncMock()
         
-        # Call the function with mock context
-        result = await get_test_summary("pytorch", "pytorch", "main", ctx=mock_ctx)
+        # Call the function to find test failures
+        result = await get_recent_commits_with_jobs(
+            "pytorch", "pytorch", "main", 
+            include_failures=True,
+            failure_line_filter_regex="(?:FAIL|ERROR):\\s+test_",  # Regex to match test failures
+            ctx=mock_ctx
+        )
         
-        # Verify the results - updated for new behavior that only checks explicit failures
-        self.assertEqual(result["test_jobs"], 3)  # 3 test jobs
-        self.assertEqual(result["total_failed_tests"], 1)  # 1 failed test (only from explicit failure)
+        # Verify the results
+        self.assertEqual(len(result["commits"]), 1)
+        commit = result["commits"][0]
+        
+        # Check counts - should include all failures, but we only extract specific ones
+        self.assertEqual(commit["job_counts"]["failure"], 3)
+        
+        # Check that only the test failure jobs are included in jobs array
+        self.assertEqual(len(commit["jobs"]), 2)
+        
+        job_names = [job.get("name") for job in commit["jobs"]]
+        self.assertIn("test_job2", job_names)
+        self.assertIn("test_job3", job_names)
+        self.assertNotIn("build_job", job_names)  # Build job should be filtered out
 
 
 if __name__ == '__main__':

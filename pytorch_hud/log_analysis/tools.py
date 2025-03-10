@@ -21,9 +21,6 @@ def get_s3_log_url(job_id: str) -> str:
     """Get the S3 log URL for a job."""
     return api.get_s3_log_url(job_id)
 
-def get_utilization_metadata(job_id: str) -> Dict[str, Any]:
-    """Get utilization metadata for a job."""
-    return api.get_utilization_metadata(job_id)
 
 def search_logs(query: str, repo: Optional[str] = None, workflow: Optional[str] = None) -> Dict[str, Any]:
     """Search job logs.

@@ -1,3 +1,5 @@
 .idea
 temp_logs
 venv
+pytorch_hud.egg-info
+env

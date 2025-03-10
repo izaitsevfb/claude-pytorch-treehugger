@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 import copy
 
-from pytorch_hud.tools.hud_data import get_job_summary, get_workflow_summary, get_test_summary, get_filtered_jobs
+from pytorch_hud.tools.hud_data import get_recent_commits_with_jobs
 
 class TestFailureInjection(unittest.IsolatedAsyncioTestCase):
     """Tests that inject failures into sample data to validate detection logic."""
@@ -104,8 +104,8 @@ class TestFailureInjection(unittest.IsolatedAsyncioTestCase):
             self.fail("Could not find jobs array in sample data")
 
     @patch('pytorch_hud.tools.hud_data.api.get_hud_data')
-    async def test_get_job_summary_detects_failures(self, mock_get_hud_data):
-        """Test that get_job_summary correctly detects both explicit and hidden failures."""
+    async def test_failure_detection(self, mock_get_hud_data):
+        """Test that get_recent_commits_with_jobs correctly detects failures."""
         # Mock the API to return our modified data
         mock_get_hud_data.return_value = self.data_with_failures
         
@@ -113,159 +113,140 @@ class TestFailureInjection(unittest.IsolatedAsyncioTestCase):
         mock_ctx = MagicMock()
         mock_ctx.info = AsyncMock()
         
-        # Call get_job_summary
-        result = await get_job_summary("pytorch", "pytorch", "main", ctx=mock_ctx)
+        # Call get_recent_commits_with_jobs with include_failures=True
+        result = await get_recent_commits_with_jobs(
+            "pytorch", 
+            "pytorch", 
+            "main", 
+            include_failures=True,
+            ctx=mock_ctx
+        )
         
-        # Verify failure count - now only counts jobs with conclusion=failure
-        # Updated to reflect new logic: only explicit failures (conclusion=failure) counted as failures
-        expected_failure_count = 2  # 1 explicit failure + 1 test failure (both have conclusion=failure)
-        actual_failure_count = result["status_counts"]["failure"]
+        # Verify we have commits in the result
+        self.assertTrue(result["commits"], "No commits returned in result")
+        self.assertGreaterEqual(len(result["commits"]), 1, "Expected at least 1 commit")
         
-        self.assertEqual(actual_failure_count, expected_failure_count, 
-                        f"Expected {expected_failure_count} failures, got {actual_failure_count}")
+        # Get the first commit
+        commit = result["commits"][0]
         
-        # Print the result for debugging
-        print("Job Summary Results:")
-        print(f"- Success: {result['status_counts']['success']}")
-        print(f"- Failure: {result['status_counts']['failure']}")
-        print(f"- Pending: {result['status_counts']['pending']}")
-        print(f"- Skipped: {result['status_counts']['skipped']}")
-
-    @patch('pytorch_hud.tools.hud_data.api.get_hud_data')
-    async def test_get_workflow_summary_detects_failures(self, mock_get_hud_data):
-        """Test that get_workflow_summary correctly detects both explicit and hidden failures."""
-        # Mock the API to return our modified data
-        mock_get_hud_data.return_value = self.data_with_failures
+        # Verify job counts - should include our injected failures
+        self.assertIn("job_counts", commit, "No job counts found in commit data")
+        self.assertIn("failure", commit["job_counts"], "No failure count found")
+        self.assertGreaterEqual(commit["job_counts"]["failure"], 2, 
+                               f"Expected at least 2 failures, got {commit['job_counts']['failure']}")
         
-        # Create a mock context with async methods
-        mock_ctx = MagicMock()
-        mock_ctx.info = AsyncMock()
+        # Verify the commit status is red due to failures
+        self.assertEqual(commit["status"], "red", "Commit status should be 'red' due to failures")
         
-        # Call get_workflow_summary
-        result = await get_workflow_summary("pytorch", "pytorch", "main", ctx=mock_ctx)
+        # Verify jobs are included and contain failures
+        self.assertIn("jobs", commit, "No jobs array in commit data")
+        self.assertGreaterEqual(len(commit["jobs"]), 2, f"Expected at least 2 jobs, got {len(commit['jobs'])}")
         
-        # Find the workflow in the result - need to check for partial matching since URL paths vary
-        target_workflow = None
-        for workflow in result["workflows"]:
-            if "runs/13709183265" in workflow["name"] or workflow["name"] == "13709183265":
-                target_workflow = workflow
-                break
-                
-        if not target_workflow:
-            # Print all available workflows for debugging
-            print("Available workflows:", [w["name"] for w in result["workflows"]])
-            # Try again with a broader search
-            for workflow in result["workflows"]:
-                if any(job["id"] in [99999001, 99999002, 99999003] for job in workflow.get("jobs", [])):
-                    target_workflow = workflow
-                    break
+        # Extract job IDs
+        job_ids = [job.get("id") for job in commit["jobs"]]
         
-        self.assertIsNotNone(target_workflow, "Could not find workflow containing our injected failures")
+        # Check for our injected failure job IDs
+        # Job IDs might be returned as strings, so convert to strings for comparison
+        job_id_strings = [str(job_id) for job_id in job_ids]
+        self.assertTrue(
+            "99999001" in job_id_strings or "99999003" in job_id_strings,
+            "Neither of our explicit failure jobs (99999001, 99999003) found in result"
+        )
         
-        # Verify failure count in the workflow - may only find 2 of our injected failures
-        # because test_failure might be in a different workflow due to different URL
-        actual_workflow_failures = target_workflow["failure"]
-        
-        # Assert we have at least 1 failure (the explicit failure in same workflow)
-        # Hidden failures are no longer counted as failures
-        self.assertGreaterEqual(actual_workflow_failures, 1, 
-                              f"Expected at least 1 failure in workflow, got {actual_workflow_failures}")
-        
-        # Count total failures across all workflows - should be 2 (both explicit failures)
-        total_failures = sum(w["failure"] for w in result["workflows"])
-        self.assertEqual(total_failures, 2, f"Expected 2 total failures across all workflows, got {total_failures}")
+        # The hidden failure job should NOT be included because it has conclusion=success
+        self.assertNotIn("99999002", job_id_strings, 
+                        "Hidden failure job (99999002) should not be in failures list")
         
         # Print results for debugging
-        print("Workflow Summary Results:")
-        if target_workflow:
-            print(f"- Workflow {target_workflow['name']}:")
-            print(f"  - Success: {target_workflow['success']}")
-            print(f"  - Failure: {target_workflow['failure']}")
-            print(f"  - Total: {target_workflow['total_jobs']}")
-        print(f"- Total failures across all workflows: {total_failures}")
-
-    @patch('pytorch_hud.tools.hud_data.api.get_hud_data')
-    async def test_get_test_summary_detects_failures(self, mock_get_hud_data):
-        """Test that get_test_summary correctly detects test failures, including in hidden failure jobs."""
-        # Mock the API to return our modified data
-        mock_get_hud_data.return_value = self.data_with_failures
-        
-        # Create a mock context with async methods
-        mock_ctx = MagicMock()
-        mock_ctx.info = AsyncMock()
-        
-        # Call get_test_summary
-        result = await get_test_summary("pytorch", "pytorch", "main", ctx=mock_ctx)
-        
-        # Verify test failures were found
-        self.assertGreater(len(result["failed_tests"]), 0, "No test failures found")
-        
-        # Verify test failure details
-        job_ids_with_failures = set()
-        test_failure_names = set()
-        
-        for failure in result["failed_tests"]:
-            job_id = failure.get("job_id")
-            if job_id:
-                # job_id could be int or str depending on implementation
-                job_ids_with_failures.add(str(job_id))
-            
-            test_name = failure.get("test_name")
-            if test_name:
-                test_failure_names.add(test_name)
-        
-        # Print the full result for inspection
-        print("Full test failure data:", json.dumps(result["failed_tests"], indent=2))
-        
-        # Check that job IDs match - now checking for substring matching
-        # because the test might extract job_id differently
-        job_id_found = False
-        for job_id in job_ids_with_failures:
-            if "99999003" in job_id:
-                job_id_found = True
-                break
-        
-        # Assert that at least our test failure was detected
-        self.assertTrue(job_id_found or len(result["failed_tests"]) > 0,
-                      "Neither test job ID nor any failures were found")
-        
-        # Print results for debugging
-        print("Test Summary Results:")
-        print(f"- Total failed tests: {result['total_failed_tests']}")
-        print(f"- Test job IDs with failures: {job_ids_with_failures}")
-        print(f"- Failed test names: {test_failure_names}")
-
-    @patch('pytorch_hud.tools.hud_data.api.get_hud_data')
-    async def test_get_filtered_jobs_detects_failures(self, mock_get_hud_data):
-        """Test that get_filtered_jobs correctly detects both explicit and hidden failures."""
-        # Mock the API to return our modified data
-        mock_get_hud_data.return_value = self.data_with_failures
-        
-        # Create a mock context with async methods
-        mock_ctx = MagicMock()
-        mock_ctx.info = AsyncMock()
-        
-        # Call get_filtered_jobs with failure filter
-        result = await get_filtered_jobs("pytorch", "pytorch", "main", status="failure", ctx=mock_ctx)
-        
-        # Verify the number of jobs returned - only jobs with conclusion=failure
-        expected_job_count = 2  # 1 explicit + 1 test failure (both have conclusion=failure)
-        actual_job_count = len(result["jobs"])
-        
-        self.assertEqual(actual_job_count, expected_job_count, 
-                       f"Expected {expected_job_count} jobs, got {actual_job_count}")
-        
-        # Verify the job IDs in the result - now only explicit failures
-        job_ids = [job.get("id") for job in result["jobs"]]
-        
-        self.assertIn(99999001, job_ids, "Explicit failure job not in result")
-        self.assertIn(99999003, job_ids, "Test failure job not in result")
-        self.assertNotIn(99999002, job_ids, "Hidden failure job should NOT be in result")
-        
-        # Print results for debugging
-        print("Filtered Jobs Results:")
-        print(f"- Total jobs: {result['pagination']['total_items']}")
+        print("Failure Detection Results:")
+        print(f"- Commit status: {commit['status']}")
+        print(f"- Job counts: {commit['job_counts']}")
+        print(f"- Number of jobs returned: {len(commit['jobs'])}")
         print(f"- Job IDs: {job_ids}")
+        
+    @patch('pytorch_hud.tools.hud_data.api.get_hud_data')
+    async def test_job_filtering(self, mock_get_hud_data):
+        """Test that job filtering options work correctly."""
+        # Mock the API to return our modified data
+        mock_get_hud_data.return_value = self.data_with_failures
+        
+        # Create a mock context with async methods
+        mock_ctx = MagicMock()
+        mock_ctx.info = AsyncMock()
+        
+        # Call with job_name_filter_regex to filter for test jobs
+        result = await get_recent_commits_with_jobs(
+            "pytorch", 
+            "pytorch", 
+            "main", 
+            include_failures=True,
+            job_name_filter_regex="test_workflow",
+            ctx=mock_ctx
+        )
+        
+        # Verify that filtering worked
+        self.assertTrue(result["commits"], "No commits returned in result")
+        commit = result["commits"][0]
+        
+        # Should have filtered to only include test jobs
+        if "jobs" in commit and commit["jobs"]:
+            # For any jobs that are returned, verify they match the filter
+            for job in commit["jobs"]:
+                # Check job name or URL for the test_workflow pattern
+                job_name = job.get("name", "")
+                html_url = job.get("htmlUrl", "")
+                
+                # If not directly in name, check the URL
+                if "test_workflow" not in job_name and html_url:
+                    self.assertIn("test_workflow", html_url, 
+                                 f"Job {job.get('id')} doesn't match the filter pattern")
+                    
+        # Print results for debugging
+        print("Job Filtering Results:")
+        print(f"- Commit status: {commit['status']}")
+        if "jobs" in commit:
+            print(f"- Number of filtered jobs: {len(commit['jobs'])}")
+            print(f"- Job IDs: {[job.get('id') for job in commit['jobs']]}")
+        
+    @patch('pytorch_hud.tools.hud_data.api.get_hud_data')
+    async def test_failure_line_filtering(self, mock_get_hud_data):
+        """Test filtering by failure line content."""
+        # Mock the API to return our modified data
+        mock_get_hud_data.return_value = self.data_with_failures
+        
+        # Create a mock context with async methods
+        mock_ctx = MagicMock()
+        mock_ctx.info = AsyncMock()
+        
+        # Call with failure line filter to find only compilation errors
+        result = await get_recent_commits_with_jobs(
+            "pytorch", 
+            "pytorch", 
+            "main", 
+            include_failures=True,
+            failure_line_filter_regex="Compilation failed",
+            ctx=mock_ctx
+        )
+        
+        # Verify that filtering worked
+        self.assertTrue(result["commits"], "No commits returned in result")
+        commit = result["commits"][0]
+        
+        # If jobs are found, they should have the specified failure line
+        if "jobs" in commit and commit["jobs"]:
+            for job in commit["jobs"]:
+                failure_lines = job.get("failureLines", [])
+                if failure_lines:
+                    compilation_failure_found = any("Compilation failed" in line for line in failure_lines)
+                    self.assertTrue(compilation_failure_found, 
+                                  f"Job {job.get('id')} doesn't have the expected failure line")
+        
+        # Print results for debugging
+        print("Failure Line Filtering Results:")
+        if "jobs" in commit:
+            print(f"- Number of jobs with compilation failures: {len(commit.get('jobs', []))}")
+            for job in commit.get("jobs", []):
+                print(f"- Job {job.get('id')} failure lines: {job.get('failureLines', [])}")
 
 if __name__ == "__main__":
     unittest.main()
