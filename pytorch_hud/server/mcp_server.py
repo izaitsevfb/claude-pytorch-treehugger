@@ -49,7 +49,7 @@ from pytorch_hud.tools.hud_data import (
     get_recent_commits_with_jobs
 )
 from pytorch_hud.log_analysis.tools import (
-    get_artifacts, get_s3_log_url, search_logs,
+    get_artifacts, get_s3_log_url, find_commits_with_similar_failures,
     download_log_to_file, extract_log_patterns, extract_test_results, filter_log_sections
 )
 from pytorch_hud.clickhouse.queries import (
@@ -184,10 +184,73 @@ async def filter_log_sections_resource(file_path: str,
 
 
 @mcp.tool()
-def search_logs_resource(query: str, repo: Optional[str] = None, workflow: Optional[str] = None) -> str:
-    """Search job logs for a specific pattern."""
-    search_result = search_logs(query, repo=repo, workflow=workflow)
+def find_commits_with_similar_failures_resource(query: str, 
+                        repo: Optional[str] = None, 
+                        workflow: Optional[str] = None,
+                        branch: Optional[str] = None,
+                        start_date: Optional[str] = None,
+                        end_date: Optional[str] = None,
+                        min_score: float = 1.0) -> str:
+    """Find commits and jobs with similar failure text using the OpenSearch API.
+    
+    This tool is essential for investigating CI failures - it helps you find historical
+    jobs that experienced similar error messages, helping to narrow down when issues
+    first appeared or finding patterns across different jobs and workflows.
+    
+    Use cases:
+    - Find when a specific error first started occurring
+    - Check if an error is occurring in specific workflows only
+    - Identify if errors are tied to specific branches or commits
+    - Discover patterns in failures over time
+    
+    Args:
+        query: The search query string containing the error or failure text
+        repo: Optional repository filter (e.g., "pytorch/pytorch")
+        workflow: Optional workflow name filter
+        branch: Optional branch name filter (e.g., "main")
+        start_date: ISO format date to begin search from (defaults to 7 days ago)
+        end_date: ISO format date to end search at (defaults to now)
+        min_score: Minimum relevance score for matches (defaults to 1.0)
+    
+    Returns:
+        JSON string with matching jobs and their details, including:
+        - matches: List of jobs with matching failure text
+        - total_matches: Total number of matches found
+        - total_lines: Total number of matching lines
+    
+    Examples:
+        Find all Linux CI jobs with CUDA errors in the past day:
+        ```
+        find_commits_with_similar_failures_resource(
+            query="CUDA error",
+            workflow="linux-build",
+            start_date="2023-03-09T00:00:00Z",
+            end_date="2023-03-10T00:00:00Z"
+        )
+        ```
+        
+        Narrow down when package hash errors started appearing:
+        ```
+        find_commits_with_similar_failures_resource(
+            query="PACKAGES DO NOT MATCH THE HASHES",
+            repo="pytorch/pytorch",
+            branch="main"
+        )
+        ```
+    """
+    search_result = find_commits_with_similar_failures(
+        failure=query, 
+        repo=repo, 
+        workflow_name=workflow,
+        branch_name=branch,
+        start_date=start_date,
+        end_date=end_date,
+        min_score=min_score
+    )
     return safe_json_dumps(search_result, indent=2)
+
+# Alias for backward compatibility
+search_logs_resource = find_commits_with_similar_failures_resource
 
 
 @mcp.tool()
@@ -249,11 +312,6 @@ async def get_flaky_tests_resource(time_range: str = "7d", test_name: Optional[s
     """Get flaky test data."""
     results = await get_flaky_tests(time_range, test_name, ctx=ctx)
     return safe_json_dumps(results, indent=2)
-
-
-
-# job_annotation_resource endpoint was removed as get_job_annotation was deprecated
-
 
 
 @mcp.tool()

@@ -33,8 +33,16 @@ master_red = api.query_clickhouse("master_commit_red", {
     "timezone": "America/Los_Angeles"
 })
 
-# Search logs across jobs
-search_results = api.search_logs("OutOfMemoryError", repo="pytorch/pytorch")
+# Search logs across jobs using OpenSearch API
+from datetime import datetime, timedelta
+start_date = (datetime.now() - timedelta(days=7)).isoformat()
+end_date = datetime.now().isoformat()
+search_results = api.search_logs(
+    failure="OutOfMemoryError",
+    repo="pytorch/pytorch",
+    start_date=start_date,
+    end_date=end_date
+)
 ```
 
 ## Code Style Guidelines
@@ -211,9 +219,48 @@ The PyTorch HUD MCP Server provides tools for efficiently analyzing CI job logs 
    # Get specific sections
    sections = await filter_log_sections(log_path, start_pattern="pattern")
    
-   # Search across logs
-   search_results = search_logs("pattern", repo="pytorch/pytorch")
+   # Search across logs using OpenSearch API
+   search_results = search_logs(
+      failure="Out of memory error", 
+      repo="pytorch/pytorch",
+      workflow_name="linux-build",
+      branch_name="main",
+      start_date="2023-01-01T00:00:00Z", 
+      end_date="2023-01-07T00:00:00Z"
+   )
    ```
+
+### Using the OpenSearch Log Search API
+
+The search_logs function and search_logs_resource MCP endpoint provide access to the PyTorch HUD OpenSearch API for searching across job logs:
+
+```python
+# MCP Tool Usage
+search_results = search_logs_resource(
+    query="PACKAGES DO NOT MATCH THE HASHES",  # The error text to search for
+    repo="pytorch/pytorch",                    # Optional repo filter
+    workflow="linux-build",                    # Optional workflow name filter
+    branch="main",                             # Optional branch filter
+    start_date="2023-01-01T00:00:00Z",         # Optional search start date (ISO format)
+    end_date="2023-01-07T00:00:00Z",           # Optional search end date (ISO format)
+    min_score=0.8                              # Optional relevance score threshold
+)
+
+# Direct Function Usage
+from pytorch_hud.log_analysis.tools import search_logs
+
+search_results = search_logs(
+    failure="PACKAGES DO NOT MATCH THE HASHES",  # The error text to search for
+    repo="pytorch/pytorch",                      # Optional repo filter
+    workflow_name="linux-build",                 # Optional workflow name
+    branch_name="main",                          # Optional branch name
+    start_date="2023-01-01T00:00:00Z",           # Optional start date
+    end_date="2023-01-07T00:00:00Z",             # Optional end date
+    min_score=0.8                                # Optional relevance threshold
+)
+```
+
+Note: If start_date and end_date are not provided, they default to the last 7 days.
 
 ### Common Error Patterns
 

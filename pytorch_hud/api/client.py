@@ -219,32 +219,6 @@ class PyTorchHudAPI:
                 "timezone": "America/Los_Angeles"
             }
 
-    def get_job_annotation(self, repo_owner: str, repo_name: str, annotation_type: str,
-                          parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Get job annotations.
-
-        Args:
-            repo_owner: Repository owner (e.g., 'pytorch')
-            repo_name: Repository name (e.g., 'pytorch')
-            annotation_type: Type of annotation (e.g., 'failures')
-            parameters: Query parameters including branch, repo, startTime, stopTime
-
-        Returns:
-            Dictionary containing job annotation data
-
-        Note:
-            Valid annotation types include 'failures', 'sccache', 'test_failures'
-        """
-        # The job_annotation endpoint seems to expect parameters in the query string, not path
-        endpoint = f"job_annotation/{annotation_type}"
-
-        # Ensure parameters contains the repo field
-        if 'repo' not in parameters:
-            parameters['repo'] = f"{repo_owner}/{repo_name}"
-
-        logger.info(f"Making job annotation request to {endpoint} with parameters {parameters}")
-        return self._make_request(endpoint, {"parameters": json.dumps(parameters)})
-
     def get_artifacts(self, provider: str, job_id: str) -> Dict[str, Any]:
         """Get artifacts for a job.
 
@@ -267,25 +241,67 @@ class PyTorchHudAPI:
         return f"https://ossci-raw-job-status.s3.amazonaws.com/log/{job_id}"
 
 
-    def search_logs(self, query: str, repo: Optional[str] = None, workflow: Optional[str] = None) -> Dict[str, Any]:
-        """Search job logs.
+    def find_commits_with_similar_failures(self, failure: str, 
+                  repo: Optional[str] = None, 
+                  workflow_name: Optional[str] = None,
+                  branch_name: Optional[str] = None,
+                  start_date: Optional[str] = None,
+                  end_date: Optional[str] = None,
+                  min_score: float = 1.0) -> Dict[str, Any]:
+        """Find commits and jobs with similar failure text using the OpenSearch API.
+        
+        This is useful for investigating CI failures by finding historical jobs with similar
+        error messages. It can help narrow down when a particular issue first appeared or
+        identify patterns across different jobs and workflows.
 
         Args:
-            query: The search query (can be regex pattern)
+            failure: String containing the error or failure text to search for
             repo: Optional repository filter (e.g., "pytorch/pytorch")
-            workflow: Optional workflow name filter
+            workflow_name: Optional filter for specific workflow
+            branch_name: Optional filter for specific branch (like "main")
+            start_date: ISO format date to begin search from (required by API, defaults to 7 days ago)
+            end_date: ISO format date to end search at (required by API, defaults to now)
+            min_score: Minimum relevance score for matches (defaults to 1.0)
 
         Returns:
-            Dictionary with search results. Note that results are limited to first 100
-            matching lines per job, and lines are truncated to 100 characters.
+            Dictionary with matching jobs and their commit details, containing:
+            - matches: List of jobs with matching failure text
+            - total_matches: Total number of matches found
+            - total_lines: Total number of matching lines
+
+        Note:
+            Results are limited to the first 100 matching lines per job,
+            and lines are truncated to 100 characters for brevity.
         """
         endpoint = "search"
-        params = {"query": query}
+        
+        # Set default dates if not provided
+        if not start_date or not end_date:
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            if not end_date:
+                end_date = now.isoformat()
+            if not start_date:
+                start_date = (now - timedelta(days=7)).isoformat()
+        
+        params = {
+            "failure": failure,
+            "startDate": start_date,
+            "endDate": end_date,
+            "minScore": min_score
+        }
+        
         if repo:
             params["repo"] = repo
-        if workflow:
-            params["workflow"] = workflow
+        if workflow_name:
+            params["workflowName"] = workflow_name
+        if branch_name:
+            params["branchName"] = branch_name
+            
         return self._make_request(endpoint, params)
+        
+    # Alias for backward compatibility
+    search_logs = find_commits_with_similar_failures
 
     def download_log(self, job_id: str) -> str:
         """Download the full text log for a job.

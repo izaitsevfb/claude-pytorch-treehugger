@@ -10,7 +10,7 @@ import requests
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from pytorch_hud import PyTorchHudAPI
-from pytorch_hud.log_analysis.tools import extract_log_patterns, extract_test_results, filter_log_sections, search_logs
+from pytorch_hud.log_analysis.tools import extract_log_patterns, extract_test_results, filter_log_sections, find_commits_with_similar_failures
 from pytorch_hud.log_analysis.tools import get_artifacts, get_s3_log_url
 
 class LogAnalysisTest(unittest.IsolatedAsyncioTestCase):
@@ -57,18 +57,26 @@ test_nn.py::TestNN::test_linear ... skipped (not implemented)
             # Set up return values
             mock_api.get_artifacts.return_value = {"artifacts": []}
             mock_api.get_s3_log_url.return_value = "https://example.com/logs/123456"
-            mock_api.search_logs.return_value = {"results": []}
+            mock_api.find_commits_with_similar_failures.return_value = {"results": []}
             
             # Test the wrapper functions
             job_id = "123456"
             artifacts = get_artifacts("s3", job_id)
             log_url = get_s3_log_url(job_id)
-            search_result = search_logs("error", repo="pytorch/pytorch")
+            search_result = find_commits_with_similar_failures(failure="error", repo="pytorch/pytorch")
             
             # Verify correct API methods were called
             mock_api.get_artifacts.assert_called_once_with("s3", job_id)
             mock_api.get_s3_log_url.assert_called_once_with(job_id)
-            mock_api.search_logs.assert_called_once_with("error", repo="pytorch/pytorch", workflow=None)
+            mock_api.find_commits_with_similar_failures.assert_called_once_with(
+                failure="error", 
+                repo="pytorch/pytorch", 
+                workflow_name=None,
+                branch_name=None,
+                start_date=None,
+                end_date=None,
+                min_score=1.0
+            )
             
             # Verify returned values
             self.assertEqual(artifacts, {"artifacts": []})

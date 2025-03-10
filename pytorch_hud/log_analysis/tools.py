@@ -22,19 +22,72 @@ def get_s3_log_url(job_id: str) -> str:
     return api.get_s3_log_url(job_id)
 
 
-def search_logs(query: str, repo: Optional[str] = None, workflow: Optional[str] = None) -> Dict[str, Any]:
-    """Search job logs.
+def find_commits_with_similar_failures(failure: str, 
+              repo: Optional[str] = None, 
+              workflow_name: Optional[str] = None,
+              branch_name: Optional[str] = None,
+              start_date: Optional[str] = None,
+              end_date: Optional[str] = None,
+              min_score: float = 1.0) -> Dict[str, Any]:
+    """Find commits and jobs with similar failure text using the OpenSearch API.
+    
+    This tool is extremely useful for investigating CI failures by finding historical
+    jobs with similar error messages. It can help:
+    - Determine when a particular issue first appeared
+    - Find related failures across different jobs/workflows
+    - Identify patterns in failures across time periods
+    - Check if failures are associated with specific branches or workflows
     
     Args:
-        query: The search query (can be regex pattern)
-        repo: Optional repository filter (e.g., "pytorch/pytorch") 
-        workflow: Optional workflow name filter
+        failure: String containing the error or failure text to search for
+        repo: Optional repository filter (e.g., "pytorch/pytorch")
+        workflow_name: Optional filter for specific workflow
+        branch_name: Optional filter for specific branch (like "main")
+        start_date: ISO format date to begin search from (defaults to 7 days ago)
+        end_date: ISO format date to end search at (defaults to now)
+        min_score: Minimum relevance score for matches (defaults to 1.0)
+    
+    Returns:
+        Dictionary with matching jobs and their commit details, containing:
+        - matches: List of jobs with matching failure text
+        - total_matches: Total number of matches found
+        - total_lines: Total number of matching lines
+        
+    Example:
+        ```python
+        # Find jobs with OOM errors in the past week
+        results = find_commits_with_similar_failures(
+            failure="CUDA out of memory", 
+            repo="pytorch/pytorch",
+            workflow_name="linux-bionic-cuda12.1-py3.10-gcc9"
+        )
+        
+        # Check when an issue first appeared (14 days ago)
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        results = find_commits_with_similar_failures(
+            failure="PACKAGES DO NOT MATCH THE HASHES",
+            start_date=(now - timedelta(days=14)).isoformat(),
+            end_date=now.isoformat()
+        )
+        ```
         
     Note:
-        This search is limited to showing the first 100 matching lines per job,
-        and lines are truncated to 100 characters if longer.
+        Results are limited to the first 100 matching lines per job,
+        and lines are truncated to 100 characters for brevity.
     """
-    return api.search_logs(query, repo=repo, workflow=workflow)
+    return api.find_commits_with_similar_failures(
+        failure=failure, 
+        repo=repo, 
+        workflow_name=workflow_name,
+        branch_name=branch_name,
+        start_date=start_date,
+        end_date=end_date,
+        min_score=min_score
+    )
+    
+# Alias for backward compatibility
+search_logs = find_commits_with_similar_failures
 
 async def download_log_to_file(job_id: int, ctx: Optional[Context] = None) -> Dict[str, Any]:
     """Download a job log to a temporary file for analysis.
