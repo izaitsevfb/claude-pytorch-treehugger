@@ -87,12 +87,8 @@ def safe_json_dumps(data: Any, indent: int = 2, max_size: int = MAX_RESPONSE_SIZ
 
     # Hard truncate with a clear error message
     warning_msg = (
-        "\n\n<ERROR: RESPONSE TRUNCATED>\n"
-        "The response exceeds the maximum size limit. Please use more specific parameters:\n"
-        "- Reduce 'per_page' value (try 3-5 instead)\n"
-        "- Use the 'fields' parameter to request only needed data\n"
-        "- For failure details, use 'include_lines=summary' or 'include_lines=none'\n"
-        "- Consider using specialized endpoints like get_commit_summary or get_job_summary"
+        "\n\n<RESPONSE TRUNCATED>\n"
+        "The response exceeds the maximum size limit. Please use more specific parameters or pagination.\n"
     )
 
     # Calculate safe truncation size
@@ -107,6 +103,76 @@ def safe_json_dumps(data: Any, indent: int = 2, max_size: int = MAX_RESPONSE_SIZ
 # ==============================================================================
 # MCP Resources
 # ==============================================================================
+@mcp.tool()
+def readme_howto_pytorch_treehugging_guide() -> str:
+    """Returns a guide on identifying ongoing trunk failures and using HUD tools.
+    Note: This guide gives a starting point for common pytorch treehugging tasks, but is not exhaustive.
+
+    It is recommended to read it before using any other tools!
+    """
+    return (
+"""
+
+## How to: Figure out which failures are currently occurring in the latest commits of the main branch, that aren’t fixed in subsequent commits.
+
+1. List recent commits using `get_recent_commits_with_jobs_resource`
+
+2. Identify failing jobs
+    Look for any commits that have failing jobs.
+
+3. Compare with newer commits
+    If the same job or test is failing in the same way at multiple previous commits and also at the most recent commit
+    (that has no pending jobs), then it is likely an ongoing failure.
+    If the most recent commit is green (and has no pending jobs), then the failure is likely fixed.
+    
+    Note: periodic jobs don't run on every commit, so you may need to run `get_recent_commits_with_jobs_resource` with 
+    `include_success=True` and `job_name_filter_regex` to ensure that the job was run on the commits.
+
+
+## How to: For a particular failure, figure out which commit first introduced it.
+
+1. Gather the exact error text
+    If the exact failure message is not known, try to infer it using
+    `get_recent_commits_with_jobs_resource` or `find_commits_with_similar_failures_resource`.
+
+2. If the error is known to be recent, use
+    `get_recent_commits_with_jobs_resource` with `failure_line_filter_regex` to find the list of commits that have the error.
+
+3. If the error is not known to be recent, use `find_commits_with_similar_failures_resource` and use the bisection by 
+    `start_date` and `end_date` to narrow down the search to the smallest range of commits.
+
+    Note: if you have a specific commit, you can use `get_recent_commits_with_jobs_resource` with `branch_or_commit_sha`
+    with per_page=1 to to get the list of jobs for that commit or per_page > 1 to get the list of commits starting from this commit.
+
+4. Double-check the specific job logs
+    Once you suspect a culprit commit with job_id = X, fetch more details with:
+        `get_job_details_resource(job_id=X)`
+        `download_log_to_file_resource(job_id=X)`
+    You can also use `extract_log_patterns_resource` to extract specific patterns from the log file.
+    
+    If you need to match the failure to the specific commit, see the guide on `howto_research_the_root_cause_of_the_failure`
+
+
+## How to: determine why a failure is happening—whether it’s a commit, an upstream dependency, or an infra issue.
+
+1. Make sure the failing commit (suspected root cause) and job_id.
+
+2. Examine the logs
+    `download_log_to_file_resource(job_id=X)`
+    Extract relevant sections:
+    `filter_log_sections_resource(file_path, start_pattern, end_pattern, max_lines=100)`
+    or use pattern matching:
+    `extract_log_patterns_resource(file_path, patterns)`
+
+3. Check commit details
+    If the log strongly suggests a code regression, check the commit changes.
+    This might mean using the GitHub PR or commit metadata.
+
+4. Investigate possible infra or dependency issues
+    Correlate the time of failure with known system outages or changes in upstream libraries.
+)
+""")
+
 
 @mcp.tool()
 def get_clickhouse_queries_resource() -> str:
@@ -184,8 +250,8 @@ async def filter_log_sections_resource(file_path: str,
 
 
 @mcp.tool()
-def find_commits_with_similar_failures_resource(query: str, 
-                        repo: Optional[str] = None, 
+def find_commits_with_similar_failures_resource(query: str,
+                        repo: Optional[str] = None,
                         workflow: Optional[str] = None,
                         branch: Optional[str] = None,
                         start_date: Optional[str] = None,
@@ -239,8 +305,8 @@ def find_commits_with_similar_failures_resource(query: str,
         ```
     """
     search_result = find_commits_with_similar_failures(
-        failure=query, 
-        repo=repo, 
+        failure=query,
+        repo=repo,
         workflow_name=workflow,
         branch_name=branch,
         start_date=start_date,
