@@ -43,9 +43,11 @@ async def get_master_commit_red(time_range: str = "7d",
     parameters = {
         "startTime": start_time,
         "stopTime": end_time,
-        "timezone": timezone
+        "timezone": timezone,
+        "granularity": "day",
+        "usePercentage": True,
     }
-    
+
     return api.query_clickhouse("master_commit_red", parameters)
 
 def get_queued_jobs() -> Dict[str, Any]:

@@ -41,6 +41,8 @@ CI issues, analyzing logs, and querying data from ClickHouse.
 
 import json
 from typing import Optional, Any, Dict
+from dotenv import load_dotenv
+load_dotenv()
 from mcp.server.fastmcp import FastMCP, Context
 
 from pytorch_hud.api.client import PyTorchHudAPI

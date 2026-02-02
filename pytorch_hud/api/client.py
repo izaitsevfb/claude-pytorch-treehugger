@@ -3,6 +3,7 @@ PyTorch HUD API client implementation
 """
 
 import json
+import os
 import requests
 import logging
 import time
@@ -35,6 +36,11 @@ class PyTorchHudAPI:
         self.retry_delay = retry_delay
         self._clickhouse_queries_cache: Optional[List[str]] = None
 
+        bot_token = os.environ.get("HUD_INTERNAL_BOT_TOKEN", "")
+        self._headers: Dict[str, str] = {}
+        if bot_token:
+            self._headers["x-hud-internal-bot"] = bot_token
+
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None,
                      retry_remaining: Optional[int] = None) -> Dict[str, Any]:
         """Make a GET request to the API with retry logic.
@@ -57,7 +63,7 @@ class PyTorchHudAPI:
 
         try:
             logger.debug(f"Making request to {url} with params {params}")
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, headers=self._headers)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:

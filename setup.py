@@ -11,7 +11,8 @@ setup(
         "fastapi",
         "uvicorn",
         "pydantic",
-        "mcp>=1.3.0"
+        "mcp>=1.3.0",
+        "python-dotenv>=0.21.0",
     ],
     classifiers=[
         "Development Status :: 3 - Alpha",
