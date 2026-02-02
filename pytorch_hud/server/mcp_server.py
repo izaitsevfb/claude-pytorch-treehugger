@@ -56,7 +56,6 @@ from pytorch_hud.log_analysis.tools import (
 )
 from pytorch_hud.clickhouse.queries import (
     query_clickhouse, get_master_commit_red, get_queued_jobs, get_disabled_test_historical,
-    get_flaky_tests
 )
 
 # Create an MCP server
@@ -371,14 +370,6 @@ async def get_disabled_test_historical_resource(time_range: str = "7d",
     results = await get_disabled_test_historical(
         time_range, label, repo, state, platform, triaged, granularity, ctx=ctx
     )
-    return safe_json_dumps(results, indent=2)
-
-
-@mcp.tool()
-async def get_flaky_tests_resource(time_range: str = "7d", test_name: Optional[str] = None,
-                                   ctx: Optional[Context] = None) -> str:
-    """Get flaky test data."""
-    results = await get_flaky_tests(time_range, test_name, ctx=ctx)
     return safe_json_dumps(results, indent=2)
 
 
