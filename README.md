@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/izaitsevfb-claude-pytorch-treehugger-badge.png)](https://mseep.ai/app/izaitsevfb-claude-pytorch-treehugger)
+
 # PyTorch HUD API with MCP Support
 
 A Python library and MCP server for interacting with the PyTorch HUD API, providing access to CI/CD data, job logs, and analytics.
