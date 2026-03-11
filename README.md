@@ -13,7 +13,7 @@ This project provides tools for PyTorch CI/CD analytics including:
 ## Usage (for humans)
 
 ```bash
-claude mcp add hud /path/to/uvx --from "git+https://github.com/izaitsevfb/claude-pytorch-treehugger.git" pytorch-hud
+claude mcp add hud -- $(which uvx) --from "git+https://github.com/izaitsevfb/claude-pytorch-treehugger.git" pytorch-hud
 ```
 
 ## Development
